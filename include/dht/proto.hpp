@@ -13,9 +13,12 @@ typedef unsigned short u16;
 typedef unsigned char u8;
 using boost::uuids::detail::sha1;
 
+const int ML = 4; // magic length
+
 const std::size_t K = 4;   // k entries in k-buckets
 const std::size_t I = 160; // hash bit width
 const int M = 3; // number of missed pings allowed
+const int C = 3; // number of periodic checks allowed
 const int T = 5; // number of seconds to wait between each pending queue check
 
 enum actions {
@@ -30,13 +33,13 @@ enum responses {
 };
 
 struct {
-    u8 magic[4];
+    u8 magic[ML];
 } const consts = {
     .magic = {0xb0, 0x0b, 0x1e, 0x55}
 };
 
 struct msg {
-    u8 magic[4];
+    u8 magic[ML];
 
     sha1::digest_type nonce;
 

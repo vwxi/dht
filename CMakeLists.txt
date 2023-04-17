@@ -40,7 +40,7 @@ add_subdirectory(extern/spdlog)
 add_executable(
 	dht
 	src/main.cpp
-	src/net.cpp
+	src/peer.cpp
 )
 
 target_include_directories(

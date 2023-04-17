@@ -1,5 +1,5 @@
-#ifndef _NET_HPP
-#define _NET_HPP
+#ifndef _PEER_HPP
+#define _PEER_HPP
 
 #include "util.hpp"
 #include "proto.hpp"
@@ -12,9 +12,9 @@ public:
     peer(boost::asio::io_context& ioc_, u16 port_) :
         ioc(ioc_),
         port(port_),
-        table(id),
-        socket(ioc_, udp::endpoint(udp::v4(), port_)),
-        pc(&peer::pending_check, this) { 
+        table(id, cache_mutex),
+        pc(&peer::pending_check, this),
+        socket(ioc_, udp::endpoint(udp::v4(), port_)) {
         id = util::gen_id(socket.local_endpoint().address().to_string(), port_);
         table.id = id;
         spdlog::info("peer setup [id: {}]", util::htos(id));
@@ -48,6 +48,8 @@ private:
     udp::endpoint client;
 
     routing_table table;
+
+    std::mutex cache_mutex;
 
     std::vector<std::shared_ptr<node>> pending;
     std::mutex pending_mutex;

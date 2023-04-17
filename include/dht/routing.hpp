@@ -12,8 +12,8 @@ namespace dht {
     tree* ptr = root; \
     int i = 0; \
     traverse(req->id, &ptr, i); \
-    if(!ptr) return; \
-    if(!ptr->data) return; \
+    assert(ptr); \
+    assert(ptr->data); \
     auto it = std::find_if(ptr->data->begin(), ptr->data->end(), \
         [&](std::shared_ptr<node> p) { return p->id == req->id; }); 
 
@@ -23,20 +23,27 @@ public:
         struct tree* left;
         struct tree* right;
         std::shared_ptr<bucket<proto::K>> data;
+        std::shared_ptr<std::list<std::shared_ptr<node>>> cache;
 
         tree() {
             left = right = nullptr;
-            data = std::make_shared<bucket<proto::K>>(); 
+            data = std::make_shared<bucket<proto::K>>();
+            cache = std::make_shared<std::list<std::shared_ptr<node>>>();
         }
 
         ~tree() {
             data.reset();
+            cache.reset();
             delete left;
             delete right;
         }
     };
 
-    routing_table(hash_t id_) : id(id_) {
+    routing_table(
+        hash_t id_, 
+        std::mutex& cache_mutex_) : 
+        id(id_),
+        cache_mutex(cache_mutex_) {
         root = new tree;
         root->data = std::make_shared<bucket<proto::K>>();
     };
@@ -82,6 +89,11 @@ public:
         t->data.reset();
     }
 
+    bool exists(std::shared_ptr<node> req) {
+        TRAVERSE;        
+        return it != ptr->data->end();
+    }
+
     void update(std::shared_ptr<node> req) {
         TRAVERSE;
 
@@ -101,7 +113,22 @@ public:
                 }
             } else {
                 spdlog::warn("bucket is far and full");
-                ptr->data->update(req, false);
+                if(exists(req)) {
+                    ptr->data->update(req, false);
+                    spdlog::info("node {} exists in table, updating normally", util::htos(req->id));
+                } else {
+                    std::lock_guard<std::mutex> g(cache_mutex);
+                    auto cit = std::find_if(ptr->cache->begin(), ptr->cache->end(),
+                        [&](std::shared_ptr<node> p) { return p->id == req->id; });
+                    
+                    if(cit == ptr->cache->end()) {
+                        ptr->cache->push_back(req);
+                        spdlog::info("node {} is unknown, adding to replacement cache", util::htos(req->id));
+                    } else {
+                        ptr->cache->splice(ptr->cache->end(), *(ptr->cache), cit);
+                        spdlog::info("node {} is unknown, moving to end of replacement cache", util::htos(req->id));
+                    }
+                }
             }
         }
     }
@@ -110,8 +137,8 @@ public:
         TRAVERSE;
 
         if(it != ptr->data->end()) {
-            if(req->missed_pings++ < proto::M) {
-                req->missed_pings--;
+            if(req->staleness++ < proto::M) {
+                req->staleness--;
                 ptr->data->splice(ptr->data->end(), *(ptr->data), it);
                 spdlog::info("pending node {} updated", util::htos(req->id));
             } else {
@@ -121,12 +148,18 @@ public:
         }
     }
 
-    void delete_pending(std::shared_ptr<node> req) {
+    void evict_pending(std::shared_ptr<node> req) {
         TRAVERSE;
 
-        if(it != ptr->data->end()) {
-            spdlog::info("delete_pending: it = {}", util::htos((*it)->id));
+        if(it != ptr->data->end())
             ptr->data->erase(it);
+
+        if(ptr->cache->size() > 0) {
+            auto cit = ptr->cache->end();
+            cit--;
+            spdlog::info("there is peer ({}) in the cache waiting, add it to the bucket", util::htos((*cit)->id));
+            ptr->data->push_back(*cit);
+            ptr->cache->erase(cit);
         }
     }
 
@@ -134,6 +167,8 @@ public:
     
 private:
     tree* root;
+
+    std::mutex& cache_mutex;
 };
 
 }

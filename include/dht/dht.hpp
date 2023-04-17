@@ -6,6 +6,6 @@
 #include "node.hpp"
 #include "bucket.hpp"
 #include "routing.hpp"
-#include "net.hpp"
+#include "peer.hpp"
 
 #endif

@@ -8,7 +8,8 @@ namespace dht {
 
 class node : public std::enable_shared_from_this<node> {
 public:
-    node(boost::asio::io_context& ioc_,
+    node(
+        boost::asio::io_context& ioc_,
         udp::socket& socket_,
         udp::endpoint endpoint_,
         std::vector<std::shared_ptr<node>>& pending_,
@@ -20,9 +21,9 @@ public:
         socket(socket_),
         pending(pending_),
         pending_mutex(pending_mutex_),
-        missed_pings(0) {
+        staleness(0),
+        checks(0) {
         id = util::gen_id(addr, port);
-        spdlog::info("RECV: addr: {}, port: {}, id: {}", addr, port, util::htos(id));
     }
 
 public:
@@ -36,7 +37,7 @@ public:
 
         std::memset(&m_in, 0, sizeof(proto::msg));
 
-        std::memcpy(&m_out.magic, proto::consts.magic, 4);
+        std::memcpy(&m_out.magic, proto::consts.magic, proto::ML);
         util::nonce(m_out.nonce);
         
         auto self(shared_from_this());
@@ -46,10 +47,11 @@ public:
                     std::lock_guard<std::mutex> lock(pending_mutex);
                     auto it = std::find_if(pending.begin(), pending.end(),
                         [&](std::shared_ptr<node> p) { return p->id == id; });
+
                     if(it == pending.end())
                         pending.push_back(shared_from_this());
                     else
-                        (*it)->missed_pings++;
+                        (*it)->staleness++;
                 }
             });
     }
@@ -57,8 +59,11 @@ public:
     hash_t id;
     std::string addr;
     u16 port;
+
+    udp::endpoint endpoint;
     
-    int missed_pings;
+    int staleness;
+    int checks;
 
     std::vector<std::shared_ptr<node>>& pending;
     std::mutex& pending_mutex;
@@ -67,7 +72,6 @@ private:
     boost::asio::io_context& ioc;
 
     udp::socket& socket;
-    udp::endpoint endpoint;
 
     proto::msg m_in;
     proto::msg m_out;

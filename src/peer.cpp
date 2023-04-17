@@ -1,10 +1,31 @@
-#include "net.hpp"
+#include "peer.hpp"
 
 namespace dht {
 
 template <>
 void peer::reply<proto::actions::ping>(std::shared_ptr<node> n, proto::msg m) {
     spdlog::info("PING FROM {}:{} (id: {})", n->addr, n->port, util::htos(n->id));
+
+    proto::msg r = {
+        .action = proto::actions::ping,
+        .reply = 1,
+        .response = proto::responses::ok,
+        .sz = 0
+    };
+
+    std::memcpy(&r.magic, &proto::consts.magic, proto::ML);
+    std::memcpy(&r.nonce, &m.nonce, proto::ML * sizeof(unsigned int));
+
+    socket.async_send_to(boost::asio::buffer(&r, sizeof(proto::msg)), n->endpoint, 
+        [this](boost::system::error_code ec, std::size_t sz) {
+            if(!ec) {
+                std::lock_guard<std::mutex> lock(pending_mutex);
+                auto it = std::find_if(pending.begin(), pending.end(),
+                    [&](std::shared_ptr<node> p) { return p->id == id; });
+                if(it != pending.end())
+                    pending.erase(it);
+            }
+        });
 
     table.update(n);
 }
@@ -28,7 +49,7 @@ void peer::run() {
         [this](const boost::system::error_code& ec, std::size_t sz) {
             if(!ec && sz == sizeof(proto::msg)) {
                 // valid magic?
-                if(std::memcmp(&msg.magic, &proto::consts.magic, 4)) 
+                if(std::memcmp(&msg.magic, &proto::consts.magic, proto::ML)) 
                     goto o;
                 
                 udp::endpoint client_c = client;
@@ -58,21 +79,23 @@ void peer::run() {
 void peer::pending_check() {
     while(true) {
         {
-            std::unique_lock<std::mutex> l(pending_mutex);
-            spdlog::info("--- pending: ");
-            for(auto& i : pending) {
-                if(i->missed_pings > proto::M) {
-                    spdlog::info("TO DELETE: {} - missed pings: {}", util::htos(i->id), i->missed_pings);
-                    table.delete_pending(i);
-                    pending.erase(
-                        std::remove_if(
-                            pending.begin(), pending.end(), 
-                            [&](std::shared_ptr<node> p) { return p->id == i->id; }), 
-                            pending.end());
-                } else {
-                    spdlog::info("AWAITING: {} - missed pings: {}", util::htos(i->id), i->missed_pings);
+            std::lock_guard<std::mutex> l(pending_mutex);
+            if(pending.size() > 0) {
+                spdlog::info("--- pending: ");
+                for(auto& i : pending) {
+                    if(i->staleness > proto::M || i->checks++ > proto::C) {
+                        spdlog::info("TO EVICT: {} - staleness: {}, checks: {}", util::htos(i->id), i->staleness, i->checks);
+                        table.evict_pending(i);
+                        pending.erase(
+                            std::remove_if(
+                                pending.begin(), pending.end(), 
+                                [&](std::shared_ptr<node> p) { return p->id == i->id; }), 
+                                pending.end());
+                    } else {
+                        spdlog::info("AWAITING: {} - staleness: {}, checks: {}", util::htos(i->id), i->staleness, i->checks);
+                    }
                 }
-            }
+            } else spdlog::info("no pending messages");
         }
 
         std::this_thread::sleep_for(seconds(proto::T));
