@@ -1,10 +1,8 @@
-#include "dht.hpp"
+#include "dht.h"
 
 int main() {
     try {
-        boost::asio::io_context ioc;
-        dht::peer p(ioc, 16666);
-        ioc.run();
+        dht::node n(16666);
     } catch (std::exception& e) {
         std::cerr << "EXCEPTION CAUGHT: " << e.what() << std::endl;
     }

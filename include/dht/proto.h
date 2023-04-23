@@ -1,5 +1,5 @@
-#ifndef _PROTO_HPP
-#define _PROTO_HPP
+#ifndef _PROTO_H
+#define _PROTO_H
 
 #include "util.hpp"
 
@@ -15,11 +15,11 @@ using boost::uuids::detail::sha1;
 
 const int ML = 4; // magic length
 
-const std::size_t K = 4;   // k entries in k-buckets
-const std::size_t I = 160; // hash bit width
+const int K = 4;   // k entries in k-buckets (SHOULD NOT BE OVER 20)
+const int I = 160; // hash bit width
 const int M = 3; // number of missed pings allowed
-const int C = 3; // number of periodic checks allowed
-const int T = 5; // number of seconds to wait between each pending queue check
+const int G = 3; // number of missed messages allowed
+const int T = 10; // number of seconds until timeout
 
 enum actions {
     ping = 0,
@@ -29,7 +29,8 @@ enum actions {
 };
 
 enum responses {
-    ok = 0
+    ok = 0,
+    bad_internal = 1
 };
 
 struct {
@@ -47,6 +48,11 @@ struct msg {
     u8 reply;
     u8 response;
     u64 sz;
+} const ping_request = {
+    .action = proto::actions::ping,
+    .reply = 0,
+    .response = proto::responses::ok,
+    .sz = 0
 };
 
 }

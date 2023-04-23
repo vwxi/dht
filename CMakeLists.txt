@@ -8,12 +8,18 @@ project(
 set(Boost_USE_STATIC_LIBS OFF)
 set(Boost_USE_MULTITHREADED ON)
 set(Boost_USE_STATIC_RUNTIME OFF)
-find_package(Boost 1.50 REQUIRED COMPONENTS system)
+find_package(Boost 1.50 REQUIRED COMPONENTS system serialization)
 
 if(NOT TARGET Boost::system)
 	add_library(Boost::system IMPORTED INTERFACE)
 	set_property(TARGET Boost::system PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${Boost_INCLUDE_DIR})
 	set_property(TARGET Boost::system PROPERTY INTERFACE_LINK_LIBRARIES ${Boost_LIBARIES})
+endif()
+
+if(NOT TARGET Boost::serialization)
+	add_library(Boost::serialization IMPORTED INTERFACE)
+	set_property(TARGET Boost::serialization PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${Boost_INCLUDE_DIR})
+	set_property(TARGET Boost::serialization PROPERTY INTERFACE_LINK_LIBRARIES ${Boost_LIBARIES})
 endif()
 
 find_package(Git QUIET)
@@ -40,7 +46,9 @@ add_subdirectory(extern/spdlog)
 add_executable(
 	dht
 	src/main.cpp
-	src/peer.cpp
+	src/network.cpp
+	src/bucket.cpp
+	src/routing.cpp
 )
 
 target_include_directories(
@@ -50,4 +58,4 @@ target_include_directories(
 	"${PROJECT_SOURCE_DIR}/extern"
 )
 
-target_link_libraries(dht PUBLIC Boost::system spdlog::spdlog pthread -g -fsanitize=undefined,address)
+target_link_libraries(dht PUBLIC Boost::system Boost::serialization spdlog::spdlog pthread -g -fsanitize=undefined,address)

@@ -20,9 +20,16 @@
 #include <boost/asio.hpp>
 #include <boost/uuid/detail/sha1.hpp>
 
+#include <boost/archive/text_oarchive.hpp>
+#include <boost/archive/text_iarchive.hpp>
+
+#include <boost/serialization/list.hpp>
+#include <boost/serialization/string.hpp>
+#include <boost/serialization/bitset.hpp>
+
 #include "spdlog/spdlog.h"
 
-#include "proto.hpp"
+#include "proto.h"
 
 namespace dht {
 
