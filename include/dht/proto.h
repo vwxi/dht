@@ -13,19 +13,27 @@ typedef unsigned short u16;
 typedef unsigned char u8;
 using boost::uuids::detail::sha1;
 
-const int ML = 4; // magic length
-
-const int K = 4;   // k entries in k-buckets (SHOULD NOT BE OVER 20)
-const int I = 160; // hash bit width
+const int ML = 4; // magic length in bytes
+const int NL = 5; // hash width in unsigned ints
+const int K = 4;   // number of entries in k-buckets (SHOULD NOT BE OVER 20)
+const int I = 160; // hash width in bits
 const int M = 3; // number of missed pings allowed
 const int G = 3; // number of missed messages allowed
-const int T = 10; // number of seconds until timeout
+const int T = 3; // number of seconds until timeout
+const int C = 3; // number of peers allowed in bucket replacement cache at one time
+const u64 MS = 65535; // max data size in bytes
 
 enum actions {
     ping = 0,
     find_node = 1,
     find_value = 2,
-    store = 3
+    store = 3,
+    ack = 4
+};
+
+enum context {
+    request = 0,
+    response = 1
 };
 
 enum responses {
@@ -42,17 +50,30 @@ struct {
 struct msg {
     u8 magic[ML];
 
-    sha1::digest_type nonce;
+    unsigned int msg_id[NL];
 
     u8 action;
     u8 reply;
     u8 response;
+    u16 reply_port;
+
     u64 sz;
 } const ping_request = {
     .action = proto::actions::ping,
     .reply = 0,
     .response = proto::responses::ok,
     .sz = 0
+};
+
+struct rp_msg {
+    u8 magic[ML];
+
+    unsigned int msg_id[NL];
+
+    u8 ack;
+    u16 msg_port;
+
+    u64 sz;
 };
 
 }

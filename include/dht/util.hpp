@@ -5,6 +5,7 @@
 #include <iomanip>
 #include <utility>
 #include <list>
+#include <set>
 #include <vector>
 #include <unordered_map>
 #include <memory>
@@ -20,8 +21,8 @@
 #include <boost/asio.hpp>
 #include <boost/uuid/detail/sha1.hpp>
 
-#include <boost/archive/text_oarchive.hpp>
-#include <boost/archive/text_iarchive.hpp>
+#include <boost/archive/binary_oarchive.hpp>
+#include <boost/archive/binary_iarchive.hpp>
 
 #include <boost/serialization/list.hpp>
 #include <boost/serialization/string.hpp>
@@ -39,6 +40,7 @@ typedef unsigned short u16;
 typedef unsigned char u8;
 
 using boost::asio::ip::udp;
+using boost::asio::ip::tcp;
 using boost::uuids::detail::sha1;
 using boost::asio::deadline_timer;
 using namespace std::chrono;
@@ -121,7 +123,7 @@ static hash_t gen_id(std::string s, u16 p) {
     return htob(id);
 }
 
-static void nonce(sha1::digest_type& h) {
+static void msg_id(sha1::digest_type& h) {
     std::random_device rd;
     std::default_random_engine re(rd());
     std::uniform_int_distribution<unsigned int> uid;

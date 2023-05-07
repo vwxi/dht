@@ -14,12 +14,14 @@ class bucket :
     public std::enable_shared_from_this<std::list<peer>> {
 public:
     friend boost::serialization::access;
-
+    
     bucket(routing_table&);
     ~bucket();
 
     template <class Archive>
-    void serialize(Archive&, const unsigned int);
+    void serialize(Archive& ar, const unsigned int version) {
+        ar & boost::serialization::base_object<std::list<peer>>(*this);
+    }
     
     void update(peer, bool);
 

@@ -8,11 +8,9 @@ bucket::bucket(routing_table& rt) : max_size(proto::K), last_seen(0), table(rt) 
 
 bucket::~bucket() { }
 
-template <class Archive>
-void bucket::serialize(Archive& ar, const unsigned int version) {
-    ar & boost::serialization::base_object<std::list<peer>>(*this);
-}
-
+/// @brief update a peer in a bucket
+/// @param req peer struct
+/// @param nearby is the current bucket nearby to root id?
 void bucket::update(peer req, bool nearby) {
     auto rit = std::find_if(begin(), end(), 
         [req](peer p) { return p.id == req.id; });
@@ -21,9 +19,10 @@ void bucket::update(peer req, bool nearby) {
         peer beg = *begin();
         spdlog::info("checking if node {} ({}:{}) is alive", util::htos(beg.id), beg.addr, beg.port);
         table.node_.send(
-            beg, 
-            proto::actions::ping, 
-            std::bind(&node::wait<proto::actions::ping>, &table.node_, _1, _2));
+            beg,
+            proto::actions::ping,
+            std::bind(&node::okay<proto::actions::ping>, &table.node_, _1, _2, _3),
+            std::bind(&node::bad<proto::actions::ping>, &table.node_, _1, _2, _3));
 
         goto end;
     }

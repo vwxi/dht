@@ -22,6 +22,7 @@ public:
     void evict(peer);
     void update_pending(peer);
     bucket find_bucket(peer);
+    int stale(peer);
     
     hash_t id;
     
