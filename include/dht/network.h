@@ -80,6 +80,7 @@ struct pending_item {
     hash_t msg_id;
     proto::actions action;
     std::promise<std::vector<u8>> promise;
+    bool satisfied;
     pending_item(hash_t, hash_t, proto::actions);
 };
 

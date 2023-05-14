@@ -34,7 +34,7 @@ namespace dht {
 /// @param msg_id_ msg_id hash
 /// @param a queued action
 pending_item::pending_item(hash_t id_, hash_t msg_id_, proto::actions a) : 
-    id(id_), msg_id(msg_id_), action(a) { }
+    id(id_), msg_id(msg_id_), action(a), satisfied(false) { }
 
 /////////////////////////////////////////////////
 /// TCP functions
@@ -103,7 +103,10 @@ void rp_node_peer::read(proto::rp_msg m, pend_it it) {
         boost::asio::buffer(d),
         [this, m, it, d](boost::system::error_code ec, std::size_t sz) {
             if(!ec && sz == m.sz) {
-                it->promise.set_value(d);
+                std::lock_guard<std::mutex> g(rp_node_.node_.pending_mutex);
+                if(!it->satisfied)
+                    it->promise.set_value(d);
+                it->satisfied = true;
             }
         });
 }
@@ -179,7 +182,7 @@ void rp_node::run() {
 }
 
 /// @private
-/// @brief send data to peer, run in a thread?
+/// @brief send data to peer
 /// @note this will be a blocking operation on purpose (reconsider?)
 /// @note also, if we're using this function, we're answering a request
 /// @param req peer struct
@@ -265,8 +268,10 @@ void node::okay<proto::actions::find_node>(
     pend_it it) {    
     std::stringstream ss;
     
-    sha1::digest_type id_;
+    sha1::digest_type id_ = {0};
     
+    std::lock_guard<std::mutex> g(pending_mutex);
+
     std::vector<u8> v = fut.get();
     std::string s(v.begin(), v.end()), str{};
     
@@ -320,8 +325,7 @@ void node::queue_current(peer req, hash_t msg_id, proto::actions a, p_callback o
     pending.emplace_back(req.id, msg_id, a);
     auto pit = pending.end();
     pit--;
-    
-    /// @todo write callbacks for tcp reply back acks
+
     std::thread(
         &node::wait, 
         this, 
@@ -402,6 +406,11 @@ void node::wait(
             bad_fn(std::move(fut), req, it);
             break;
         }
+
+        {
+            std::lock_guard<std::mutex> g(pending_mutex);
+            pending.erase(it);
+        }
     } catch(std::future_error& e) {
         if(e.code() == std::future_errc::future_already_retrieved) {
             std::lock_guard<std::mutex> g(table.mutex);
@@ -439,7 +448,7 @@ void node::reply<proto::actions::find_node>(peer req) {
     // drop request if there's no tcp data to recv
     if(m_in.sz <= 0)
         return;
-    
+
     // read node from tcp socket 
     queue_current(
         req,
@@ -457,6 +466,7 @@ void node::reply<proto::actions::find_node>(peer req) {
         util::htob(m_in.msg_id),
         proto::actions::ack,
         [this](std::future<std::vector<u8>> fut, peer req, pend_it it) {
+            std::lock_guard<std::mutex> g(pending_mutex);
             OBTAIN_FUT_MSG;
             
             // we have a proper ack?
@@ -471,7 +481,7 @@ void node::reply<proto::actions::find_node>(peer req) {
         [this](std::future<std::vector<u8>> fut, peer req, pend_it it) {
             spdlog::error("we did not get an ack back or the peer sent bad data for find_node");
         });
-
+                    
     UPDATE
 }
 
@@ -505,8 +515,9 @@ void node::run() {
                         std::vector<u8> v(sizeof(proto::msg));
                         std::memcpy(&v[0], &m_in, sizeof(proto::msg));
 
-                        pit->promise.set_value(std::move(v));
-                        pending.erase(pit);
+                        if(!pit->satisfied)
+                            pit->promise.set_value(std::move(v));
+                        pit->satisfied = true;
 
                         // if you have a pending request, we will ignore you
                         if(m_in.reply == proto::context::request)
@@ -517,14 +528,12 @@ void node::run() {
                 spdlog::info("msg from {}:{} (rp: {}) id {}", p.addr, p.port, p.reply_port, util::htos(p.id));
 
 #define r(a) case proto::actions::a: reply<proto::actions::a>(p); break;
-#define R(a) case proto::actions::a: handle<proto::actions::a>(p); break;
                 if(!m_in.reply) {
                     switch(m_in.action) {
                     r(ping) r(find_node)
                     }
                 }
 #undef r
-#undef R
             }
 
             o: run();
