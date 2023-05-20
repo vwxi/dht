@@ -20,9 +20,6 @@ namespace dht {
     std::memcpy(&m_out.magic, proto::consts.magic, proto::ML); \
     std::memcpy(&m_out.msg_id, &m_in.msg_id, proto::NL);
 
-#define UPDATE \
-    { std::lock_guard<std::mutex> l(table.mutex); table.update(req); }
-
 #define OBTAIN_FUT_MSG \
     std::vector<u8> v = fut.get(); \
     proto::msg m; \
@@ -436,7 +433,7 @@ void node::reply<proto::actions::ping>(peer req) {
             /// @todo do nothing?
         });
 
-    UPDATE
+    table.update(req);
 }
 
 /// @brief reply to a find_node request
@@ -482,7 +479,7 @@ void node::reply<proto::actions::find_node>(peer req) {
             spdlog::error("we did not get an ack back or the peer sent bad data for find_node");
         });
                     
-    UPDATE
+    table.update(req);
 }
 
 /////////////////////////////////////////////////
@@ -541,5 +538,4 @@ void node::run() {
 }
 
 #undef MAKE_MSG
-#undef UPDATE
 }
