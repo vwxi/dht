@@ -13,13 +13,13 @@
     auto it = std::find_if(ptr->data->begin(), ptr->data->end(), \
         [&](peer p) { return p.id == req.id; }); 
 
+namespace tulip {
 namespace dht {
 
 /// @brief initialize a tree
-/// @param rt routing_table reference
-tree::tree(routing_table& rt) {
+tree::tree() {
     left = right = nullptr;
-    data = std::make_shared<bucket>(rt);
+    data = std::make_shared<bucket>();
     cache = std::make_shared<std::list<peer>>();
     leaf = true;
 }
@@ -36,7 +36,7 @@ tree::~tree() {
 /// @param id_ root id
 /// @param node__ node reference
 routing_table::routing_table(hash_t id_, node& node__) : id(id_), node_(node__) {
-    root = new tree(*this);
+    root = new tree;
 };
 
 routing_table::~routing_table() {
@@ -68,10 +68,10 @@ void routing_table::traverse(hash_t id, tree** ptr, int& i) {
 void routing_table::split(tree* t, int i) {
     if(!t) return;
 
-    t->left = new tree(*this);
+    t->left = new tree;
     if(!t->left) return;
 
-    t->right = new tree(*this);
+    t->right = new tree;
     if(!t->right) return;
 
     t->leaf = false;
@@ -103,26 +103,26 @@ void routing_table::update(peer req) {
     hash_t prefix(((~hash_t(0) << (proto::I - i)) & ~hash_t(0)));
         
     if(ptr->data->size() < ptr->data->max_size) {
-        spdlog::warn("bucket isn't full, update node {}", util::htos(req.id));
+        spdlog::debug("bucket isn't full, update node {}", util::htos(req.id));
         // bucket is not full, update node
-        ptr->data->update(req, true);
+        ptr->data->update(*this, req, true);
     } else {
         if((req.id & prefix) == (id & prefix)) {
             if(it == ptr->data->end()) {
-                spdlog::warn("bucket is within prefix, split");
+                spdlog::debug("bucket is within prefix, split");
                 // bucket is full and within our own prefix, split
                 split(ptr, i);
             } else {
-                spdlog::warn("bucket is nearby and full");
+                spdlog::debug("bucket is nearby and full");
                 // bucket is full but nearby, update node
-                ptr->data->update(req, true);
+                ptr->data->update(*this, req, true);
             }
         } else {
-            spdlog::warn("bucket is far and full");
+            spdlog::debug("bucket is far and full");
             if(exists(req)) {
                 // node is known to us already, ping normally
-                ptr->data->update(req, false);
-                spdlog::info("node {} exists in table, updating normally", util::htos(req.id));
+                ptr->data->update(*this, req, false);
+                spdlog::debug("node {} exists in table, updating normally", util::htos(req.id));
             } else {
                 // node is unknown
                 std::lock_guard<std::mutex> g(ptr->cache_mutex);
@@ -132,17 +132,17 @@ void routing_table::update(peer req) {
                 if(cit == ptr->cache->end()) {
                     // is the cache full? kick out oldest node and add this one
                     if(ptr->cache->size() > proto::C) {
-                        spdlog::info("replacement cache is full, removing oldest candidate");
+                        spdlog::debug("replacement cache is full, removing oldest candidate");
                         ptr->cache->pop_front();
                     }
                     
                     // node is unknown and doesn't exist in cache, add
                     ptr->cache->push_back(req);
-                    spdlog::info("node {} is unknown, adding to replacement cache", util::htos(req.id));
+                    spdlog::debug("node {} is unknown, adding to replacement cache", util::htos(req.id));
                 } else {
                     // node is unknown and exists in cache, move to back
                     ptr->cache->splice(ptr->cache->end(), *(ptr->cache), cit);
-                    spdlog::info("node {} is unknown, moving to end of replacement cache", util::htos(req.id));
+                    spdlog::debug("node {} is unknown, moving to end of replacement cache", util::htos(req.id));
                 }
             }
         }
@@ -160,7 +160,7 @@ void routing_table::evict(peer req) {
         if(ptr->cache->size() > 0) {
             auto cit = ptr->cache->end();
             cit--;
-            spdlog::info("there is peer ({}) in the cache waiting, add it to the bucket", util::htos(cit->id));
+            spdlog::debug("there is peer ({}) in the cache waiting, add it to the bucket", util::htos(cit->id));
             ptr->data->push_back(*cit);
             ptr->cache->erase(cit);
         }
@@ -176,10 +176,10 @@ void routing_table::update_pending(peer req) {
         if(req.staleness++ < proto::M) {
             req.staleness--;
             ptr->data->splice(ptr->data->end(), *(ptr->data), it);
-            spdlog::info("pending node {} updated", util::htos(req.id));
+            spdlog::debug("pending node {} updated", util::htos(req.id));
         } else {
             ptr->data->erase(it);
-            spdlog::info("erasing pending node {}", util::htos(req.id));
+            spdlog::debug("erasing pending node {}", util::htos(req.id));
         }
     }
 }
@@ -203,6 +203,7 @@ int routing_table::stale(peer req) {
     return -1;
 }
 
+}
 }
 
 #undef TRAVERSE

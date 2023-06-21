@@ -37,6 +37,8 @@ these sockets should run on different threads, as to not cause blocking.
 
 ## messages
 
+one message per client should be handled at any time. a client should not have more than one message actively being processed.  
+
 ### message context
 
 are we requesting, responding or are we doing something else? these are represented as `u8`:
@@ -75,6 +77,7 @@ the messaging port is the UDP port.
 | action (`u8` x 1)            |
 | context (`u8` x 1)           |
 | response (`u8` x 1)          |
+| messaging port (`u16` x 1)   |
 | reply-back port (`u16` x 1)  |
 | payload size (`u64` x 1)     |
 
@@ -89,6 +92,7 @@ the messaging port is the UDP port.
 | magic (`u8` x `ML`)          |
 | msg id (`NL`-`unsigned int`s)|
 | messaging port (`u16` x 1)   |
+| reply-back port (`u16` x 1)  |
 | payload size (`u64` x 1)     |
 
 after receiving an `rp_msg`, the TCP socket should be ready to receive `payload size` bytes.  
@@ -121,6 +125,7 @@ UDP         TCP    Action
 ```
 UDP         TCP    Action
 ----->             requester sends find_node msg
+         ----->    requester sends rp_msg detailing payload size
          ----->    requester sends serialized node to find (NL unsigned ints)
 <-----             responder replies with a msg detailing payload size
          <-----    responder sends rp_msg detailing payload size and other information

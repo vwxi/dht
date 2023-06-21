@@ -26,13 +26,7 @@ cmake --build .
 
 ## list of stuff to do
 
-- refactor (done)
-- ping (done)
-- replacement cache (done)
-- TCP reply back operation (done)
-    - find_node reply back (done)
-- TCP acks to data transfers (done)
-- find_node
-- testing interface
-- find_value
+- actual kv store
 - store
+- find_value
+- testing interface

@@ -4,6 +4,7 @@
 #include "util.hpp"
 #include "bucket.h"
 
+namespace tulip {
 namespace dht {
 
 struct tree;
@@ -43,10 +44,11 @@ struct tree {
     std::shared_ptr<std::list<peer>> cache;
     std::mutex cache_mutex;
 
-    tree(routing_table&);
+    tree();
     ~tree();
 };
 
+}
 }
 
 #endif

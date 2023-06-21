@@ -49,6 +49,7 @@ add_executable(
 	src/network.cpp
 	src/bucket.cpp
 	src/routing.cpp
+	src/dht.cpp
 )
 
 target_include_directories(
@@ -58,4 +59,4 @@ target_include_directories(
 	"${PROJECT_SOURCE_DIR}/extern"
 )
 
-target_link_libraries(dht PUBLIC Boost::system Boost::serialization spdlog::spdlog pthread -g)#-fsanitize=undefined,address)
+target_link_libraries(dht PUBLIC Boost::system Boost::serialization spdlog::spdlog pthread)# -g -fsanitize=undefined,address)

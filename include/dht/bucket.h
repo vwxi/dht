@@ -3,6 +3,7 @@
 
 #include "util.hpp"
 
+namespace tulip {
 namespace dht {
 
 class routing_table;
@@ -15,23 +16,22 @@ class bucket :
 public:
     friend boost::serialization::access;
     
-    bucket(routing_table&);
+    bucket();
     ~bucket();
 
     template <class Archive>
     void serialize(Archive& ar, const unsigned int version) {
+        ar & max_size;
         ar & boost::serialization::base_object<std::list<peer>>(*this);
     }
     
-    void update(peer, bool);
+    void update(routing_table&, peer, bool);
 
     u64 last_seen;
     std::size_t max_size;
-
-private:
-    routing_table& table;
 };
 
+}
 }
 
 #endif
