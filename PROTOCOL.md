@@ -55,6 +55,7 @@ messages require an action to be associated with them. these are represented as 
 - `0x01`: request the `K` closest peers to an ID (find_node)
 - `0x02`: find a value in the network hash table based on the key (find_value)
 - `0x03`: store a value in the recipient's local hash table (store)
+- `0x04`: acknowledge receiving data (ack)
 
 ### message response codes
 

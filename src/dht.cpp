@@ -51,7 +51,6 @@ void node::find_node(dht::peer p, dht::hash_t h, bkt_callback ok_fn, c_callback 
             bad_fn(p_);
         });
 
-    // data 2
     std::string a_;
     a_.resize(dht::proto::NL * sizeof(unsigned int));
     std::memcpy((void*)a_.c_str(), a, dht::proto::NL * sizeof(unsigned int));
@@ -71,16 +70,10 @@ void node::find_node(dht::peer p, dht::hash_t h, bkt_callback ok_fn, c_callback 
                 bia >> bkt;
             }
 
-            spdlog::critical("holy cow, {}", bkt.size());
-
-            for(dht::peer p : bkt) {
-                spdlog::info("bkt elem: {}:{}:{} (id {})", p.addr, p.port, p.reply_port, dht::util::htos(p.id));
-            }
+            // send an ack back
+            reply(p_, dht::proto::actions::ack, h_, 0, p_do_nothing, p_do_nothing);
 
             ok_fn(p_, std::move(bkt));
-
-            // send an ack back
-            reply(p_, dht::proto::actions::ack, h_, 0, p_do_nothing, p_do_nothing);            
         },
         [bad_fn, this](std::future<std::string> fut_, dht::peer p_, dht::pend_it pit_) {
             bad<dht::proto::actions::find_node>(std::move(fut_), p_, pit_);
