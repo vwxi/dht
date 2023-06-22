@@ -38,6 +38,7 @@ struct {
 struct msg {
     u8 magic[ML];
 
+    unsigned int id[NL];
     unsigned int msg_id[NL];
 
     u8 action;
@@ -58,6 +59,7 @@ struct msg {
 struct rp_msg {
     u8 magic[ML];
 
+    unsigned int id[NL];
     unsigned int msg_id[NL];
 
     u8 ack;

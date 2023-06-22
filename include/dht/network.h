@@ -27,17 +27,19 @@ struct peer {
 
     peer(hash_t id_) : id(id_) { }
     
+    peer(std::string a, u16 p, u16 rp, hash_t id_) : 
+        addr(a), 
+        port(p), 
+        reply_port(rp), 
+        staleness(0),
+        id(id_) { }
+
     peer(std::string a, u16 p, u16 rp) : 
         addr(a), 
         port(p), 
         reply_port(rp), 
-        staleness(0) { id = util::gen_id(a, p, rp); }
-
-    peer(udp::endpoint e, u16 rp) :
-        addr(e.address().to_string()),
-        port(e.port()),
-        reply_port(rp),
-        staleness(0) { id = util::gen_id(e.address().to_string(), e.port(), rp); }
+        staleness(0),
+        id(0) { }
 
     udp::endpoint to_udp_endpoint() const {
         return udp::endpoint{boost::asio::ip::address::from_string(addr), port};
@@ -56,31 +58,28 @@ struct peer {
     }
 
     template <class Archive>
-    void save(Archive& ar, const unsigned int version) const {
+    void serialize(Archive& ar, const unsigned int version) {
         ar & addr;
         ar & port;
         ar & reply_port;
+        ar & id;
     }
 
-    template <class Archive>
-    void load(Archive& ar, const unsigned int version) {
-        ar & addr;
-        ar & port;
-        ar & reply_port;
-        id = util::gen_id(addr, port, reply_port);
+    bool operator==(const peer& rhs) {
+        return !addr.compare(rhs.addr) && 
+            port == rhs.port && 
+            reply_port == rhs.reply_port;
     }
-
-    BOOST_SERIALIZATION_SPLIT_MEMBER()
 };
 
 struct pending_item {
-    hash_t id;
+    peer req;
     hash_t msg_id;
     proto::actions action;
     std::promise<std::string> promise;
     bool satisfied;
     bool rp;
-    pending_item(hash_t, hash_t, proto::actions, bool);
+    pending_item(peer, hash_t, proto::actions, bool);
 };
 
 class rp_node_peer;

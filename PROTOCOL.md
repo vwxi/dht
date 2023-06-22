@@ -74,6 +74,7 @@ the messaging port is the UDP port.
 | `struct msg`                 |
 |------------------------------|
 | magic (`u8` x `ML`)          |
+| id (`NL`-`unsigned int`s)    |
 | msg id (`NL`-`unsigned int`s)|
 | action (`u8` x 1)            |
 | context (`u8` x 1)           |
@@ -91,6 +92,7 @@ the messaging port is the UDP port.
 | `struct rp_msg`              |
 |------------------------------|
 | magic (`u8` x `ML`)          |
+| id (`NL`-`unsigned int`s)    |
 | msg id (`NL`-`unsigned int`s)|
 | messaging port (`u16` x 1)   |
 | reply-back port (`u16` x 1)  |

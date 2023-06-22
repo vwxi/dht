@@ -65,6 +65,7 @@ const u64 MS = 65535; // max data size in bytes
 }
 
 typedef std::bitset<proto::I> hash_t;
+typedef unsigned int id_t[proto::NL];
 
 namespace util { // utilities
 
@@ -107,7 +108,7 @@ static std::string htos(hash_t h) {
     return ss.str();
 }
 
-static hash_t htob(sha1::digest_type h) {
+static hash_t htob(id_t h) {
     hash_t b(0), t(0);
     const u64 sh = sizeof(unsigned int) << 3;
     
@@ -120,7 +121,7 @@ static hash_t htob(sha1::digest_type h) {
     return b;
 }
 
-static void btoh(hash_t b, sha1::digest_type& h) {
+static void btoh(hash_t b, id_t& h) {
     const u64 sh = 32;
     hash_t s(0xffffffff);
 
@@ -131,21 +132,18 @@ static void btoh(hash_t b, sha1::digest_type& h) {
     h[4] = (b & s).to_ulong(); b >>= sh;
 }
 
-static hash_t gen_id(std::string s, u16 p, u16 rp) {
-    std::string full = string_format("%s:%u:%u", s.c_str(), p, rp);
-    boost::uuids::detail::sha1 sha;
-    sha1::digest_type id;
-    sha.process_bytes(full.data(), full.size());
-    sha.get_digest(id);
-    return htob(id);
-}
-
-static void msg_id(sha1::digest_type& h) {
+static void msg_id(id_t& h) {
     std::random_device rd;
     std::default_random_engine re(rd());
     std::uniform_int_distribution<unsigned int> uid;
 
     std::generate(std::begin(h), std::end(h), [&]() { return uid(re); });
+}
+
+static hash_t gen_id() {
+    id_t id;
+    msg_id(id);
+    return htob(id);
 }
 
 }

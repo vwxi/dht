@@ -41,11 +41,16 @@ void node::ping(dht::peer p, c_callback ok_fn, c_callback bad_fn) {
 /// @param ok_fn success callback
 /// @param bad_fn failure callback
 void node::find_node(dht::peer p, dht::hash_t h, bkt_callback ok_fn, c_callback bad_fn) {
-    sha1::digest_type a;
+    dht::id_t a;
     dht::util::btoh(h, a);
     
     dht::hash_t h_ = send(p, dht::proto::actions::find_node, dht::proto::NL, 
-        p_do_nothing,
+        [&](std::future<std::string> fut, dht::peer, dht::pend_it) {
+            using namespace dht;
+            OBTAIN_FUT_MSG;
+
+            p.id = util::htob(m.id);
+        },
         [bad_fn, this](std::future<std::string> fut, dht::peer p_, dht::pend_it pit) {
             bad<dht::proto::actions::find_node>(std::move(fut), p_, pit);
             bad_fn(p_);
