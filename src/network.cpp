@@ -325,8 +325,6 @@ void node::bad<proto::actions::ping>(
     std::future<std::string> fut, 
     peer req, 
     pend_it it) {
-    OBTAIN_FUT_MSG;
-
     {
         std::lock_guard<std::mutex> g(table.mutex);
         int s;
@@ -344,8 +342,6 @@ void node::bad<proto::actions::find_node>(
     std::future<std::string> fut, 
     peer req, 
     pend_it it) {
-    OBTAIN_FUT_MSG;
-    
     spdlog::debug("node did not send find_node information");
 }
 

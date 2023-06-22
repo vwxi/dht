@@ -39,8 +39,6 @@ void bucket::update(routing_table& table, peer req, bool nearby) {
                 }
             },
             [t = &table.node_](std::future<std::string> fut, peer req, pend_it it) {
-                OBTAIN_FUT_MSG;
-
                 {
                     std::lock_guard<std::mutex> g(t->table.mutex);
                     int s;
