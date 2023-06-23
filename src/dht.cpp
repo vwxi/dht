@@ -115,6 +115,8 @@ dht::bucket node::lookup(
     // is closest empty?
     if(closest.empty()) return closest;
 
+    spdlog::info("closest size: {}", closest.size());
+
     for(peer p : closest) {
         spdlog::info("sending find_node to peer {}:{}:{}", p.addr, p.port, p.reply_port);
     }

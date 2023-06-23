@@ -79,7 +79,7 @@ void rp_node_peer::read_handler(const boost::system::error_code& ec, std::size_t
 
     if(ec || 
         sz != sizeof(proto::rp_msg) ||
-        std::memcmp(&m_in.magic, proto::consts.magic, proto::ML) ||
+        std::memcmp(m_in.magic, proto::consts.magic, proto::ML) ||
         m_in.sz > proto::MS ||
         !(m_in.msg_port > 0 && m_in.msg_port < 65536) ||
         !(m_in.reply_port > 0 && m_in.reply_port < 65536) ||
@@ -315,12 +315,12 @@ void node::okay<proto::actions::ping>(
     pend_it it) {
     OBTAIN_FUT_MSG;
                         
-    if(!std::memcmp(&m.magic, &proto::consts.magic, proto::ML) &&
+    if(!std::memcmp(m.magic, proto::consts.magic, proto::ML) &&
         m.action == proto::actions::ping &&
         m.reply == proto::context::response) {
         {
             std::lock_guard<std::mutex> g(table.mutex);
-            table.update_pending(req);
+            table.update(req);
         }
 
         spdlog::debug("responded, updating");
@@ -400,7 +400,7 @@ void node::queue_ack(peer req, hash_t msg_id) {
             OBTAIN_FUT_MSG;
             
             // we have a proper ack?
-            if(!std::memcmp(&m.magic, &proto::consts.magic, proto::ML) &&
+            if(!std::memcmp(m.magic, proto::consts.magic, proto::ML) &&
                 m.action == proto::actions::ack &&
                 m.reply == proto::context::response) {
                 spdlog::debug("we got a proper ack back");
@@ -644,10 +644,8 @@ void node::run() {
             if((!ec || ec == boost::asio::error::eof) && sz == sizeof(proto::msg)) {
                 hash_t id_ = util::htob(m_in.id);
 
-                spdlog::info("id_: {}", util::htos(id_));
-
                 // correct magic, reply port is valid
-                if(std::memcmp(&m_in.magic, &proto::consts.magic, proto::ML) ||
+                if(std::memcmp(m_in.magic, proto::consts.magic, proto::ML) ||
                     !(m_in.msg_port > 0 && m_in.msg_port < 65536) ||
                     !(m_in.reply_port > 0 && m_in.reply_port < 65536) ||
                     id_ == hash_t(0)) 

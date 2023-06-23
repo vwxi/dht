@@ -28,12 +28,12 @@ int main(int argc, char** argv) {
                 [&](dht::peer p) { spdlog::info("not ok"); });
         }).detach();
 
-        //std::thread([&n, t]() {
-        //    while(true) {
-        //        n.lookup(dht::hash_t(1) << 120);
-        //        std::this_thread::sleep_for(std::chrono::seconds(5));
-        //    }
-        //}).detach();
+        std::thread([&n, t]() {
+            while(true) {
+                n.lookup(dht::hash_t(1) << 120);
+                std::this_thread::sleep_for(std::chrono::seconds(5));
+            }
+        }).detach();
     }
 
     return 0;
