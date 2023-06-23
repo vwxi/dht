@@ -46,7 +46,7 @@ using boost::uuids::detail::sha1;
 using boost::asio::deadline_timer;
 using namespace std::chrono;
 using namespace std::placeholders;
-using rand_eng = std::uniform_int_distribution<unsigned int>;
+using rand_eng = std::uniform_int_distribution<u32>;
 
 namespace dht {
 
@@ -61,11 +61,22 @@ const int G = 3; // number of missed messages allowed
 const int T = 10; // number of seconds until timeout
 const int C = 3; // number of peers allowed in bucket replacement cache at one time
 const u64 MS = 65535; // max data size in bytes
+const int A = 3; // `a` from kademlia paper
 
 }
 
 typedef std::bitset<proto::I> hash_t;
-typedef unsigned int id_t[proto::NL];
+
+template<std::size_t N>
+bool operator<(const std::bitset<N>& x, const std::bitset<N>& y)
+{
+    for (int i = N-1; i >= 0; i--) {
+        if (x[i] ^ y[i]) return y[i];
+    }
+    return false;
+}
+
+typedef u32 id_t[proto::NL];
 
 namespace util { // utilities
 

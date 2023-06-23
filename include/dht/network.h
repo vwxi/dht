@@ -58,7 +58,7 @@ struct peer {
     }
 
     template <class Archive>
-    void serialize(Archive& ar, const unsigned int version) {
+    void serialize(Archive& ar, const u32 version) {
         ar & addr;
         ar & port;
         ar & reply_port;
@@ -70,6 +70,8 @@ struct peer {
             port == rhs.port && 
             reply_port == rhs.reply_port;
     }
+
+
 };
 
 struct pending_item {
@@ -159,6 +161,7 @@ public:
     void bad(std::future<std::string>, peer, pend_it);
 
     void queue_current(peer, hash_t, proto::actions, bool, p_callback, p_callback);
+    void queue_ack(peer, hash_t);
     
     hash_t id;
     u16 port;

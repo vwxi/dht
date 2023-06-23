@@ -26,7 +26,7 @@ cmake --build .
 
 ## list of stuff to do
 
-- actual kv store
+- lookup algorithm
 - store
 - find_value
 - testing interface

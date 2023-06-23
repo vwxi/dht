@@ -22,8 +22,8 @@ namespace dht {
     }; \
     id_t id_ = {0}; util::btoh(id, id_); \
     std::memcpy(m_out.magic, proto::consts.magic, proto::ML); \
-    std::memcpy(m_out.id, id_, proto::NL * sizeof(unsigned int)); \
-    std::memcpy(m_out.msg_id, m_in.msg_id, proto::NL * sizeof(unsigned int));
+    std::memcpy(m_out.id, id_, proto::NL * sizeof(u32)); \
+    std::memcpy(m_out.msg_id, m_in.msg_id, proto::NL * sizeof(u32));
 
 /// @private
 /// @brief initialize a pending item
@@ -251,8 +251,8 @@ void rp_node::send(
     util::btoh(node_.id, id_);
 
     std::memcpy(out.magic, proto::consts.magic, proto::ML);
-    std::memcpy(out.id, id_, proto::NL * sizeof(unsigned int));
-    std::memcpy(out.msg_id, msg_id_, proto::NL * sizeof(unsigned int));
+    std::memcpy(out.id, id_, proto::NL * sizeof(u32));
+    std::memcpy(out.msg_id, msg_id_, proto::NL * sizeof(u32));
 
     socket.open(tcp::v4());
     
@@ -356,7 +356,7 @@ void node::bad<proto::actions::find_node>(
 /// UDP node functions
 /////////////////////////////////////////////////
 
-/// @public
+/// @private
 /// @brief queue current peer into pending list
 /// @param req peer struct
 /// @param msg_id message id
@@ -383,6 +383,34 @@ void node::queue_current(
         pit, 
         ok_fn,
         bad_fn).detach();
+}
+
+/// @private
+/// @brief queue an ack response
+/// @param req peer struct
+/// @param msg_id message id
+void node::queue_ack(peer req, hash_t msg_id) {
+    // NOTE: we don't really need an ACK packet, just to ensure the data was sent completely for UI
+    queue_current(req,
+        util::htob(m_in.msg_id),
+        proto::actions::ack,
+        false,
+        [this](std::future<std::string> fut, peer req, pend_it it) {
+            std::lock_guard<std::mutex> g(pending_mutex);
+            OBTAIN_FUT_MSG;
+            
+            // we have a proper ack?
+            if(!std::memcmp(&m.magic, &proto::consts.magic, proto::ML) &&
+                m.action == proto::actions::ack &&
+                m.reply == proto::context::response) {
+                spdlog::debug("we got a proper ack back");
+            } else {
+                spdlog::debug("we didnt get a proper ack back");
+            }
+        },
+        [this](std::future<std::string> fut, peer req, pend_it it) {
+            spdlog::error("we did not get an ack back or the peer sent bad data for find_node");
+        });
 }
 
 /// @private
@@ -420,7 +448,7 @@ hash_t node::send(peer req, proto::actions a, p_callback ok_fn, p_callback bad_f
     return util::htob(m_out.msg_id);
 }
 
-/// @public
+/// @private
 /// @brief send a message over UDP to a peer
 /// @param req peer struct
 /// @param a request action
@@ -441,13 +469,13 @@ hash_t node::send(peer req, proto::actions a, u64 sz, p_callback ok_fn, p_callba
     id_t id_ = {0}; util::btoh(id, id_);
 
     std::memcpy(&m_out.magic, proto::consts.magic, proto::ML);
-    std::memcpy(m_out.id, id_, proto::NL * sizeof(unsigned int));
+    std::memcpy(m_out.id, id_, proto::NL * sizeof(u32));
     util::msg_id(m_out.msg_id);
 
     return send(req, a, ok_fn, bad_fn);
 }
 
-/// @public
+/// @private
 /// @brief reply to a message over UDP to a peer specifying the msg id
 /// @param req peer struct
 /// @param a request action
@@ -469,7 +497,7 @@ hash_t node::reply(peer req, proto::actions a, hash_t msg_id, u64 sz, p_callback
     id_t id_ = {0}; util::btoh(id, id_);
 
     std::memcpy(&m_out.magic, proto::consts.magic, proto::ML);
-    std::memcpy(m_out.id, id_, proto::NL * sizeof(unsigned int));
+    std::memcpy(m_out.id, id_, proto::NL * sizeof(u32));
     util::btoh(msg_id, m_out.msg_id);
 
     return send(req, a, ok_fn, bad_fn);
@@ -570,10 +598,10 @@ void node::reply<proto::actions::find_node>(peer req) {
             std::string s(v.begin(), v.end()), str{};
 
             // TODO: check if node id is good
-            if(s.size() != proto::NL * sizeof(unsigned int))
+            if(s.size() != proto::NL * sizeof(u32))
                 return;
 
-            std::memcpy((void*)id_, (void*)s.c_str(), proto::NL * sizeof(unsigned int));
+            std::memcpy((void*)id_, (void*)s.c_str(), proto::NL * sizeof(u32));
 
             {
                 boost::archive::binary_oarchive boa(ss);
@@ -599,27 +627,8 @@ void node::reply<proto::actions::find_node>(peer req) {
             },
         std::bind(&node::bad<proto::actions::find_node>, this, _1, _2, _3));
 
-    // NOTE: we don't really need an ACK packet, just to ensure the data was sent completely for UI
-    queue_current(req,
-        util::htob(m_in.msg_id),
-        proto::actions::ack,
-        false,
-        [this](std::future<std::string> fut, peer req, pend_it it) {
-            std::lock_guard<std::mutex> g(pending_mutex);
-            OBTAIN_FUT_MSG;
-            
-            // we have a proper ack?
-            if(!std::memcmp(&m.magic, &proto::consts.magic, proto::ML) &&
-                m.action == proto::actions::ack &&
-                m.reply == proto::context::response) {
-                spdlog::debug("we got a proper ack back");
-            } else {
-                spdlog::debug("we didnt get a proper ack back");
-            }
-        },
-        [this](std::future<std::string> fut, peer req, pend_it it) {
-            spdlog::error("we did not get an ack back or the peer sent bad data for find_node");
-        });
+    
+    queue_ack(req, util::htob(m_in.msg_id));
     
     table.update(req);
 }

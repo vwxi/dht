@@ -19,7 +19,7 @@ these are constants within the software that you will have to change if you wish
 
 - magic length in bytes (`ML`) (default: 4)
 - magic bytes (`consts.magic`) (default: `b0 0b 1e 55`)
-- hash width in unsigned ints (`NL`) (default: 5)
+- hash width in u32s (`NL`) (default: 5)
 - number of peer entries allowed in one bucket (`K`) (default: 4) (CHANGE!)
 - hash width in bits (`I`) (default: 160)
 - number of missed pings allowed (`M`) (default: 3) (CHANGE!)
@@ -27,6 +27,7 @@ these are constants within the software that you will have to change if you wish
 - number of seconds until timeout (`T`) (default: 10) (CHANGE!)
 - number of candidate peers allowed in replacement cache (`C`) (default: 3)
 - max data size in bytes (`MS`) (default: 65535) (CHANGE?)
+- `a` value from kademlia paper (`A`) (default: 3)
 
 ## infrastructure
 
@@ -74,8 +75,8 @@ the messaging port is the UDP port.
 | `struct msg`                 |
 |------------------------------|
 | magic (`u8` x `ML`)          |
-| id (`NL`-`unsigned int`s)    |
-| msg id (`NL`-`unsigned int`s)|
+| id (`NL`-`u32`s)             |
+| msg id (`NL`-`u32`s)         |
 | action (`u8` x 1)            |
 | context (`u8` x 1)           |
 | response (`u8` x 1)          |
@@ -92,10 +93,10 @@ the messaging port is the UDP port.
 | `struct rp_msg`              |
 |------------------------------|
 | magic (`u8` x `ML`)          |
-| id (`NL`-`unsigned int`s)    |
-| msg id (`NL`-`unsigned int`s)|
-| messaging port (`u16` x 1)   |
-| reply-back port (`u16` x 1)  |
+| id (`NL`-`u32`s)    |
+| msg id (`NL`-`u32`s)|
+| messaging port (`u32` x 1)   |
+| reply-back port (`u32` x 1)  |
 | payload size (`u64` x 1)     |
 
 after receiving an `rp_msg`, the TCP socket should be ready to receive `payload size` bytes.  
@@ -129,7 +130,7 @@ UDP         TCP    Action
 UDP         TCP    Action
 ----->             requester sends find_node msg
          ----->    requester sends rp_msg detailing payload size
-         ----->    requester sends serialized node to find (NL unsigned ints)
+         ----->    requester sends serialized node to find (NL u32s)
 <-----             responder replies with a msg detailing payload size
          <-----    responder sends rp_msg detailing payload size and other information
          <-----    responder sends actual payload (serialized bucket)

@@ -57,8 +57,8 @@ void node::find_node(dht::peer p, dht::hash_t h, bkt_callback ok_fn, c_callback 
         });
 
     std::string a_;
-    a_.resize(dht::proto::NL * sizeof(unsigned int));
-    std::memcpy((void*)a_.c_str(), a, dht::proto::NL * sizeof(unsigned int));
+    a_.resize(dht::proto::NL * sizeof(u32));
+    std::memcpy((void*)a_.c_str(), a, dht::proto::NL * sizeof(u32));
 
     rp_node_.send(p, h_, a_, se_do_nothing, se_do_nothing);
 
@@ -85,6 +85,48 @@ void node::find_node(dht::peer p, dht::hash_t h, bkt_callback ok_fn, c_callback 
             bad_fn(p_);
         }
     );
+}
+
+/*
+ * lookup algorithm:
+ * 
+ * have a set of visited nodes
+ * have a current set of closest nodes
+ * 
+ * 1. pick a nodes from closest local bucket
+ * 2. for each node picked
+ *    2a. perform a find_node of the target on node
+ *      2a.a. if target returns data, add to visited node list
+ *      2a.b. with list of k nodes, pick a closest nodes that aren't in visited
+ *      2a.c. with list of a closest nodes, have as current closest node list candidate and goto 3
+ * 3. if list candidate features nodes no closer than current set of closest nodes, terminate lookup
+ * 4. otherwise, set current set of closest nodes to candidate and commence another round with new 
+ *    closest nodes list instead of local bucket
+ */
+dht::bucket node::lookup(
+    std::set<dht::peer>& visited,
+    dht::bucket candidate,
+    dht::bucket closest,
+    dht::hash_t target_id) {
+    using namespace dht;
+
+    // cover base cases
+
+    // is closest empty?
+    if(closest.empty()) return closest;
+
+    for(peer p : closest) {
+        spdlog::info("sending find_node to peer {}:{}:{}", p.addr, p.port, p.reply_port);
+    }
+}
+
+dht::bucket node::lookup(dht::hash_t target_id) {
+    std::lock_guard<std::mutex> l(table.mutex);
+
+    std::set<dht::peer> visited;
+    dht::bucket bkt = table.find_bucket(dht::peer(target_id));
+
+    return lookup(visited, dht::bucket(), bkt, target_id);
 }
 
 }

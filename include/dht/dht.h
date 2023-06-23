@@ -27,7 +27,12 @@ public:
     void ping(dht::peer, c_callback, c_callback);
     void find_node(dht::peer, dht::hash_t, bkt_callback, c_callback);
 
+    dht::bucket lookup(std::set<dht::peer>&, dht::bucket, dht::bucket, dht::hash_t);
+    dht::bucket lookup(dht::hash_t);
+
     dht::hash_t own_id();
+
+    std::unordered_map<dht::hash_t, std::string> ht;
 };
 
 }

@@ -20,7 +20,7 @@ public:
     ~bucket();
 
     template <class Archive>
-    void serialize(Archive& ar, const unsigned int version) {
+    void serialize(Archive& ar, const u32 version) {
         ar & max_size;
         ar & boost::serialization::base_object<std::list<peer>>(*this);
     }
