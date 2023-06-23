@@ -49,6 +49,7 @@ void node::find_node(dht::peer p, dht::hash_t h, bkt_callback ok_fn, c_callback 
             using namespace dht;
             OBTAIN_FUT_MSG;
 
+            // we now have an id for this peer
             p.id = util::htob(m.id);
         },
         [bad_fn, this](std::future<std::string> fut, dht::peer p_, dht::pend_it pit) {
@@ -128,7 +129,7 @@ dht::bucket node::lookup(dht::hash_t target_id) {
     std::set<dht::peer> visited;
     dht::bucket bkt = table.find_bucket(dht::peer(target_id));
 
-    return lookup(visited, dht::bucket(), bkt, target_id);
+    return lookup(visited, dht::bucket{}, bkt, target_id);
 }
 
 }

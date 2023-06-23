@@ -319,6 +319,9 @@ void node::okay<proto::actions::ping>(
         m.action == proto::actions::ping &&
         m.reply == proto::context::response) {
         {
+            // we now have an id for this peer
+            req.id = util::htob(m.id);
+            
             std::lock_guard<std::mutex> g(table.mutex);
             table.update(req);
         }
