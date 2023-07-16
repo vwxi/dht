@@ -11,10 +11,8 @@
 
 namespace tulip {
 
-// client callback
-using c_callback = std::function<void(dht::peer)>;
-// client callback (bucket)
-using bkt_callback = std::function<void(dht::peer, dht::bucket)>;
+using c_callback = std::function<void(dht::peer)>; // empty client callback
+using bkt_callback = std::function<void(dht::peer, dht::bucket)>; // client callback returns bucket & peer
 
 /// @brief accessible interface
 class node : dht::node {
@@ -27,7 +25,7 @@ public:
     void ping(dht::peer, c_callback, c_callback);
     void find_node(dht::peer, dht::hash_t, bkt_callback, c_callback);
 
-    dht::bucket lookup(std::set<dht::peer>&, dht::bucket, dht::bucket, dht::hash_t);
+    dht::bucket lookup(std::mutex&, std::mutex&, std::mutex&, std::list<dht::peer>&, dht::bucket&, dht::hash_t);
     dht::bucket lookup(dht::hash_t);
 
     dht::hash_t own_id();

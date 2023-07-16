@@ -71,5 +71,11 @@ end:
     last_seen = duration_cast<seconds>(system_clock::now().time_since_epoch()).count();
 }
 
+// is bucket closer to t than b
+bool bucket::closer(const bucket& b, hash_t t) {
+    auto cmp = [t](peer a, peer b) { return a.distance(t) < b.distance(t); };
+    return std::min_element(begin(), end(), cmp)->id < std::min_element(b.begin(), b.end(), cmp)->id;
+}
+
 }
 }

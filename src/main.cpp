@@ -9,7 +9,19 @@ int main(int argc, char** argv) {
     if(argc > 3) {
         dht::peer t(std::string(argv[3]), std::atoi(argv[4]), std::atoi(argv[5]));
 
-        std::thread([&n, t]() {
+        int i = std::atoi(argv[6]);
+
+        if(i == 1) {
+            n.ping(t,
+                [&](dht::peer) {
+                    dht::bucket b = n.lookup(dht::hash_t(0xb00b1e5));
+                    spdlog::critical("contents of lookup bucket: ");
+                    for(auto c : b)
+                        spdlog::critical("\tcandidate: {}:{}:{} id {}", c.addr, c.port, c.reply_port, dht::util::htos(c.id));
+                },
+                [&](dht::peer p) { spdlog::info("not ok"); });
+        } else {
+            std::thread([&n, t]() {
             //n.find_node(t,
             //    n.own_id(),
             //    [&](tulip::dht::peer p, tulip::dht::bucket bkt) {
@@ -26,14 +38,8 @@ int main(int argc, char** argv) {
             n.ping(t,
                 [&](dht::peer p) { spdlog::info("ok"); },
                 [&](dht::peer p) { spdlog::info("not ok"); });
-        }).detach();
-
-        std::thread([&n, t]() {
-            while(true) {
-                n.lookup(dht::hash_t(1) << 120);
-                std::this_thread::sleep_for(std::chrono::seconds(5));
-            }
-        }).detach();
+            }).detach();
+        }
     }
 
     return 0;

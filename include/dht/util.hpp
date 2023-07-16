@@ -48,6 +48,15 @@ using namespace std::chrono;
 using namespace std::placeholders;
 using rand_eng = std::uniform_int_distribution<u32>;
 
+template<std::size_t N>
+bool operator<(const std::bitset<N>& x, const std::bitset<N>& y)
+{
+    for (int i = N-1; i >= 0; i--) {
+        if (x[i] ^ y[i]) return y[i];
+    }
+    return false;
+}
+
 namespace dht {
 
 namespace proto {
@@ -55,7 +64,7 @@ namespace proto {
 const int ML = 4; // magic length in bytes
 const int NL = 5; // hash width in unsigned ints
 const int K = 4;   // number of entries in k-buckets (SHOULD NOT BE OVER 20)
-const int I = 160; // hash width in bits
+const int I = 32; // hash width in bits
 const int M = 3; // number of missed pings allowed
 const int G = 3; // number of missed messages allowed
 const int T = 10; // number of seconds until timeout
@@ -66,15 +75,6 @@ const int A = 3; // `a` from kademlia paper
 }
 
 typedef std::bitset<proto::I> hash_t;
-
-template<std::size_t N>
-bool operator<(const std::bitset<N>& x, const std::bitset<N>& y)
-{
-    for (int i = N-1; i >= 0; i--) {
-        if (x[i] ^ y[i]) return y[i];
-    }
-    return false;
-}
 
 typedef u32 id_t[proto::NL];
 
@@ -112,8 +112,8 @@ static std::string htos(hash_t h) {
     ss << std::hex;
     std::cout << std::hex;
 
-    for (auto b : bytes) {
-        ss << std::setw(2) << std::setfill('0') << static_cast<int>(b);
+    for (auto b = bytes.rbegin(); b != bytes.rend(); ++b) {
+        ss << std::setw(2) << std::setfill('0') << static_cast<int>(*b);
     }
 
     return ss.str();
@@ -143,17 +143,15 @@ static void btoh(hash_t b, id_t& h) {
     h[4] = (b & s).to_ulong(); b >>= sh;
 }
 
-static void msg_id(id_t& h) {
-    std::random_device rd;
-    std::default_random_engine re(rd());
+static void msg_id(std::default_random_engine& reng, id_t& h) {
     std::uniform_int_distribution<unsigned int> uid;
 
-    std::generate(std::begin(h), std::end(h), [&]() { return uid(re); });
+    std::generate(std::begin(h), std::end(h), [&]() { return uid(reng); });
 }
 
-static hash_t gen_id() {
+static hash_t gen_id(std::default_random_engine& reng) {
     id_t id;
-    msg_id(id);
+    msg_id(reng, id);
     return htob(id);
 }
 

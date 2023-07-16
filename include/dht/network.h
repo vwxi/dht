@@ -12,7 +12,7 @@ namespace dht {
     std::string v = fut.get(); \
     proto::msg m; \
     std::memcpy(reinterpret_cast<char*>(&m), v.c_str(), v.size());
-    
+
 struct peer {
     friend boost::serialization::access;
 
@@ -65,13 +65,13 @@ struct peer {
         ar & id;
     }
 
-    bool operator==(const peer& rhs) {
+    bool operator==(const peer& rhs) const {
         return !addr.compare(rhs.addr) && 
             port == rhs.port && 
             reply_port == rhs.reply_port;
     }
 
-
+    hash_t distance(hash_t from) { return id ^ from; }
 };
 
 struct pending_item {
@@ -93,6 +93,8 @@ using pend_it = std::list<pending_item>::iterator;
 using se_callback = std::function<void(peer)>;
 // peer callback
 using p_callback = std::function<void(std::future<std::string>, peer, pend_it)>;
+// boost asio callback
+using ba_callback = std::function<void(boost::system::error_code, std::size_t)>;
 
 using rpn_ptr = std::shared_ptr<rp_node_peer>;
 
@@ -103,17 +105,18 @@ public:
     typedef std::shared_ptr<rp_node_peer> ptr;
 
     rp_node_peer(rp_node&, tcp::socket);
-
+    rp_node_peer(rp_node&, tcp::endpoint);
+    
     void handle();
     void read_handler(const boost::system::error_code&, std::size_t);
-    void read_data_handler(const boost::system::error_code&, std::size_t, pend_it);
     void write(proto::rp_msg, std::string, peer, se_callback, se_callback);
-    void write_handler(const boost::system::error_code&, std::size_t, std::string, peer, se_callback, se_callback);
 
     void kill();
 
 private:
     tcp::socket socket;
+    tcp::endpoint endpoint;
+
     proto::rp_msg m_in;
     proto::rp_msg m_out;
     std::string buf;
@@ -171,6 +174,8 @@ public:
     std::list<pending_item> pending;
 
 protected:
+    ba_callback ba_do_nothing = [&](boost::system::error_code ec, std::size_t sz) { };
+
     void run();
     
     void wait(peer, pend_it, p_callback, p_callback);
@@ -189,8 +194,13 @@ protected:
     udp::socket socket;
     udp::endpoint client;
 
+    std::mutex m_out_mutex;
+
     proto::msg m_in;
     proto::msg m_out;
+
+    std::random_device rd;
+    std::default_random_engine reng;
 };
 
 }

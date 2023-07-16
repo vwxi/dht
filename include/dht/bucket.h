@@ -27,6 +27,8 @@ public:
     
     void update(routing_table&, peer, bool);
 
+    bool closer(const bucket&, hash_t);
+
     u64 last_seen;
     std::size_t max_size;
 };

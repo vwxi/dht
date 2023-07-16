@@ -128,7 +128,7 @@ UDP         TCP    Action
 
 ```
 UDP         TCP    Action
------>             requester sends find_node msg
+----->             requester sends find_node msg 
          ----->    requester sends rp_msg detailing payload size
          ----->    requester sends serialized node to find (NL u32s)
 <-----             responder replies with a msg detailing payload size
