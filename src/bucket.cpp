@@ -5,7 +5,7 @@
 namespace tulip {
 namespace dht {
 
-bucket::bucket() : max_size(proto::K), last_seen(0) { };
+bucket::bucket() : max_size(proto::bucket_size), last_seen(0) { };
 
 bucket::~bucket() { }
 
@@ -27,11 +27,11 @@ void bucket::update(routing_table& table, peer req, bool nearby) {
             [t = &table.node_](std::future<std::string> fut, peer req, pend_it it) {
                 OBTAIN_FUT_MSG;
 
-                if(!std::memcmp(&m.magic, &proto::consts.magic, proto::ML) &&
+                if(!std::memcmp(&m.magic, &proto::consts.magic, proto::magic_length) &&
                     m.action == proto::actions::ping &&
                     m.reply == proto::context::response) {
                     {
-                        std::lock_guard<std::mutex> g(t->table.mutex);
+                        LOCK(t->table.mutex);
                         t->table.update_pending(req);
                     }
 
@@ -40,9 +40,9 @@ void bucket::update(routing_table& table, peer req, bool nearby) {
             },
             [t = &table.node_](std::future<std::string> fut, peer req, pend_it it) {
                 {
-                    std::lock_guard<std::mutex> g(t->table.mutex);
+                    LOCK(t->table.mutex);
                     int s;
-                    if((s = t->table.stale(req)) > proto::M) {
+                    if((s = t->table.stale(req)) > proto::missed_pings_allowed) {
                         t->table.evict(req);
                         spdlog::debug("did not respond, evicting {}", util::htos(req.id));
                     } else if(s != -1) {

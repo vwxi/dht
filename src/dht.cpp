@@ -45,7 +45,7 @@ void node::find_node(dht::peer p, dht::hash_t h, bkt_callback ok_fn, c_callback 
     dht::util::btoh(h, a);
     dht::util::msg_id(reng, m_id);
 
-    dht::hash_t h_ = send(p, dht::proto::actions::find_node, dht::proto::NL, 
+    dht::hash_t h_ = send(p, dht::proto::actions::find_node, dht::proto::u32_hash_width, 
         [&](std::future<std::string> fut, dht::peer, dht::pend_it pit) {
             using namespace dht;
             OBTAIN_FUT_MSG;
@@ -59,12 +59,12 @@ void node::find_node(dht::peer p, dht::hash_t h, bkt_callback ok_fn, c_callback 
         });
 
     std::string a_;
-    a_.resize(dht::proto::NL * sizeof(u32));
-    std::memcpy((void*)a_.c_str(), a, dht::proto::NL * sizeof(u32));
+    a_.resize(dht::proto::u32_hash_width * sizeof(u32));
+    std::memcpy((void*)a_.c_str(), a, dht::proto::u32_hash_width * sizeof(u32));
 
     rp_node_.send(p, h_, a_, se_do_nothing, se_do_nothing);
 
-    queue_current(p, h_, dht::proto::actions::find_node, true,
+    queue(p, h_, dht::proto::actions::find_node, true,
         [h_, ok_fn, bad_fn, this](std::future<std::string> fut_, dht::peer p_, dht::pend_it pit_) {
             std::stringstream ss;
             std::string f = fut_.get();
@@ -120,7 +120,7 @@ dht::bucket node::lookup(dht::hash_t target_id) {
     bucket closest;
 
     {
-        std::lock_guard<std::mutex> l(table.mutex);
+        LOCK(table.mutex);
         closest = table.find_bucket(peer(target_id));
     }
 
@@ -129,15 +129,11 @@ dht::bucket node::lookup(dht::hash_t target_id) {
         if(closest.empty())
             return closest;
 
-        spdlog::warn("new round");
-
         std::list<std::future<bucket>> tasks;
         std::list<bucket> responses;
         bucket candidate;
 
         for(peer p : closest) {
-            spdlog::info("contacting {}:{}:{}...", p.addr, p.port, p.reply_port);
-
             visited.push_back(p);
 
             tasks.push_back(std::async(
@@ -148,14 +144,11 @@ dht::bucket node::lookup(dht::hash_t target_id) {
 
                     find_node(p_, target_id,
                         [&, pr = std::make_shared<std::promise<bucket>>(std::move(prom))](peer r, bucket bkt) {
-                            spdlog::info("results of find_node from {}:{}:{}:", r.addr, r.port, r.reply_port);
-                            for(auto c : bkt)
-                                spdlog::info("\t peer {}:{}:{} id {} distance {}", c.addr, c.port, c.reply_port, util::htos(c.id), peer(c.id).distance(target_id).to_string());
                             pr->set_value(std::move(bkt));
                         },
                         se_do_nothing);
 
-                    switch(fut.wait_for(std::chrono::seconds(proto::T))) {
+                    switch(fut.wait_for(std::chrono::seconds(proto::net_timeout))) {
                     case std::future_status::ready:
                         return fut.get();
                     default:
@@ -166,8 +159,9 @@ dht::bucket node::lookup(dht::hash_t target_id) {
             ));
         }
 
-        for(auto&& t : tasks)
+        for(auto&& t : tasks) {
             responses.push_back(t.get());
+        }
 
         responses.remove_if([&](bucket a) { return a.empty(); });
 
@@ -178,7 +172,7 @@ dht::bucket node::lookup(dht::hash_t target_id) {
             [&](bucket a, bucket b) { return a.closer(b, target_id); });
 
         // how do we really know when to remove ourselves?
-        // further, is it even necessary?
+        // furthermore, is it even necessary?
         candidate.remove_if([&](peer a) { 
             return std::count(visited.begin(), visited.end(), a) != 0 || 
                 a.id == id; });
@@ -186,18 +180,7 @@ dht::bucket node::lookup(dht::hash_t target_id) {
         if(candidate.empty())
             break;
 
-        spdlog::info("candidates:");
-
-        for(auto c : candidate)
-            spdlog::info("\t candidate {}:{}:{} id {} distance {}", c.addr, c.port, c.reply_port, util::htos(c.id), peer(c.id).distance(target_id).to_string());
-
-        spdlog::info("closest:");
-
-        for(auto c : closest)
-            spdlog::info("\t closest {}:{}:{} id {} distance {}", c.addr, c.port, c.reply_port, util::htos(c.id), peer(c.id).distance(target_id).to_string());
-
         if(candidate.closer(closest, target_id)) {
-            spdlog::info("new candidate");
             closest = candidate;
         } else break;
     }

@@ -33,9 +33,11 @@
 
 #include "spdlog/spdlog.h"
 
+#define LOCK(m) std::lock_guard<std::mutex> l(m);
+
 namespace tulip {
 
-typedef unsigned long long int u64;
+typedef unsigned long long int u64; 
 typedef unsigned long int u32;
 typedef unsigned short u16;
 typedef unsigned char u8;
@@ -61,22 +63,22 @@ namespace dht {
 
 namespace proto {
 
-const int ML = 4; // magic length in bytes
-const int NL = 5; // hash width in unsigned ints
-const int K = 4;   // number of entries in k-buckets (SHOULD NOT BE OVER 20)
-const int I = 32; // hash width in bits
-const int M = 3; // number of missed pings allowed
-const int G = 3; // number of missed messages allowed
-const int T = 10; // number of seconds until timeout
-const int C = 3; // number of peers allowed in bucket replacement cache at one time
-const u64 MS = 65535; // max data size in bytes
-const int A = 3; // `a` from kademlia paper
+const int magic_length = 4; // magic length in bytes
+const int u32_hash_width = 5; // hash width in unsigned ints
+const int bucket_size = 4;   // number of entries in k-buckets (SHOULD NOT BE OVER 20)
+const int bit_hash_width = 32; // hash width in bits
+const int missed_pings_allowed = 3; // number of missed pings allowed
+const int missed_messages_allowed = 3; // number of missed messages allowed
+const int net_timeout = 10; // number of seconds until timeout
+const int repl_cache_size = 3; // number of peers allowed in bucket replacement cache at one time
+const u64 max_data_size = 65535; // max data size in bytes
+const int alpha = 3; // alpha from kademlia paper
 
 }
 
-typedef std::bitset<proto::I> hash_t;
+typedef std::bitset<proto::bit_hash_width> hash_t;
 
-typedef u32 id_t[proto::NL];
+typedef u32 id_t[proto::u32_hash_width];
 
 namespace util { // utilities
 

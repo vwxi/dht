@@ -30,13 +30,13 @@ enum responses {
 };
 
 struct {
-    u8 magic[ML];
+    u8 magic[magic_length];
 } const consts = {
     .magic = {0xb0, 0x0b, 0x1e, 0x55}
 };
 
 struct msg {
-    u8 magic[ML];
+    u8 magic[magic_length];
 
     id_t id;
     id_t msg_id;
@@ -57,7 +57,7 @@ struct msg {
 };
 
 struct rp_msg {
-    u8 magic[ML];
+    u8 magic[magic_length];
 
     id_t id;
     id_t msg_id;

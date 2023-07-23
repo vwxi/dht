@@ -52,7 +52,7 @@ void routing_table::traverse(hash_t id, tree** ptr, int& i) {
     if(!*ptr) return;
 
     while((*ptr)->leaf == false) {
-        if(id[proto::I - i++]) {
+        if(id[proto::bit_hash_width - i++]) {
             if(!(*ptr)->right) { *ptr = NULL; return; }
             *ptr = (*ptr)->right;
         } else {
@@ -77,7 +77,7 @@ void routing_table::split(tree* t, int i) {
     t->leaf = false;
 
     for(auto& it : *(t->data)) {
-        if(it.id[proto::I - i]) {
+        if(it.id[proto::bit_hash_width - i]) {
             t->right->data->push_back(it);
         } else { 
             t->left->data->push_back(it);
@@ -101,7 +101,7 @@ bool routing_table::exists(peer req) {
 void routing_table::update(peer req) {
     TRAVERSE;
 
-    hash_t prefix(((~hash_t(0) << (proto::I - i)) & ~hash_t(0)));
+    hash_t prefix(((~hash_t(0) << (proto::bit_hash_width - i)) & ~hash_t(0)));
         
     if(ptr->data->size() < ptr->data->max_size) {
         spdlog::debug("bucket isn't full, update node {}", util::htos(req.id));
@@ -126,13 +126,13 @@ void routing_table::update(peer req) {
                 spdlog::debug("node {} exists in table, updating normally", util::htos(req.id));
             } else {
                 // node is unknown
-                std::lock_guard<std::mutex> g(ptr->cache_mutex);
+                LOCK(ptr->cache_mutex);
                 auto cit = std::find_if(ptr->cache->begin(), ptr->cache->end(),
                     [&](peer p) { return p.id == req.id; });
                 
                 if(cit == ptr->cache->end()) {
                     // is the cache full? kick out oldest node and add this one
-                    if(ptr->cache->size() > proto::C) {
+                    if(ptr->cache->size() > proto::repl_cache_size) {
                         spdlog::debug("replacement cache is full, removing oldest candidate");
                         ptr->cache->pop_front();
                     }
@@ -180,7 +180,7 @@ void routing_table::update_pending(peer req) {
     // does peer exist in table?
     if(it != ptr->data->end()) {
         // if peer isn't too stale, decrement staleness and move to end of bucket
-        if(req.staleness++ < proto::M) {
+        if(req.staleness++ < proto::missed_pings_allowed) {
             req.staleness--;
             ptr->data->splice(ptr->data->end(), *(ptr->data), it);
             spdlog::debug("pending node {} updated", util::htos(req.id));

@@ -163,7 +163,7 @@ public:
     template <proto::actions a>
     void bad(std::future<std::string>, peer, pend_it);
 
-    void queue_current(peer, hash_t, proto::actions, bool, p_callback, p_callback);
+    void queue(peer, hash_t, proto::actions, bool, p_callback, p_callback);
     void queue_ack(peer, hash_t);
     
     hash_t id;
@@ -187,7 +187,8 @@ protected:
 
     boost::asio::io_context ioc;
 
-    std::thread server_thread;
+    std::thread tcp_thread;
+    std::thread udp_thread;
     
     rp_node rp_node_;
     
