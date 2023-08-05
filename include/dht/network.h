@@ -74,6 +74,20 @@ struct peer {
     hash_t distance(hash_t from) { return id ^ from; }
 };
 
+struct store_data {
+    friend boost::serialization::access;
+
+    hash_t key;
+    std::string data;
+
+    template <class Archive>
+    void serialize(Archive& ar, const u32 version) {
+        ar & key;
+        ar & data;
+    }
+};
+
+
 struct pending_item {
     peer req;
     hash_t msg_id;

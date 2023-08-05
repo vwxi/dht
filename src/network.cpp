@@ -530,10 +530,42 @@ void node::reply<proto::actions::ping>(peer req) {
     table.update(req);
 }
 
+/// @brief reply to a store request
+/// @param req peer struct
+template <>
+void node::reply<proto::actions::store>(peer req) {
+    // drop request if there's no tcp data to recv
+    if(m_in.sz <= 0)
+        return;
+
+    // send first msg ack back
+    send(
+        false, 
+        proto::context::response, 
+        proto::responses::ok, 
+        req, 
+        proto::actions::store,
+        0, 
+        util::htob(m_in.msg_id),
+        p_do_nothing, 
+        p_do_nothing);
+
+    hash_t orig_id = util::htob(m_in.msg_id);
+
+    // await store_data
+
+}
+
 /// @brief reply to a find_node request
 /// @param req peer struct
 template <>
 void node::reply<proto::actions::find_node>(peer req) {
+    // drop request if there's no tcp data to recv
+    if(m_in.sz <= 0)
+        return;
+
+    hash_t orig_id = util::htob(m_in.msg_id);
+
     // send first msg ack back
     send(
         false, 
@@ -542,15 +574,9 @@ void node::reply<proto::actions::find_node>(peer req) {
         req, 
         proto::actions::find_node,
         0, 
-        util::htob(m_in.msg_id),
+        orig_id,
         p_do_nothing, 
         p_do_nothing);
-
-    // drop request if there's no tcp data to recv
-    if(m_in.sz <= 0)
-        return;
-
-    hash_t orig_id = util::htob(m_in.msg_id);
 
     // await target ID over TCP
     await(
