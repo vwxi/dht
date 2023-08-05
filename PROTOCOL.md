@@ -109,6 +109,8 @@ to acknowledge that the data was received, send a `msg` with the `context` set t
 
 ***NOTE:*** any non data transfer related messages should have payload size set to 0.
 
+***NOTE:*** all messages after the first message must be *responses*
+
 ### legend
 
 ```
@@ -122,7 +124,7 @@ LEGEND:
 ```
 UDP         TCP    Action
 ----->             requester sends ping msg
-<-----             responder replies with ping msg reply (context set to 0x01)
+<-----             responder replies with ping msg response
 ```
 
 ### find_node
@@ -130,9 +132,11 @@ UDP         TCP    Action
 ```
 UDP         TCP    Action
 ----->             requester sends find_node msg 
+<-----             responder replies with find_node msg ok response (no data)
          ----->    requester sends rp_msg detailing payload size
          ----->    requester sends serialized node to find (u32_hash_width u32s)
-<-----             responder replies with a msg detailing payload size
+<-----             responder replies with a msg detailing payload size (response)
+----->             requester replies with details msg ok response (no data)
          <-----    responder sends rp_msg detailing payload size and other information
          <-----    responder sends actual payload (serialized bucket)
 ----->             requester replies with a msg acknowledging receival (action: ack, context: response)

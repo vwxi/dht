@@ -21,10 +21,13 @@ void bucket::update(routing_table& table, peer req, bool nearby) {
         peer beg = *begin();
         spdlog::debug("checking if node {} ({}:{}) is alive", util::htos(beg.id), beg.addr, beg.port);
         table.node_.send(
+            true,
+            proto::context::request,
+            proto::responses::ok,
             beg,
             proto::actions::ping,
             0,
-            [t = &table.node_](std::future<std::string> fut, peer req, pend_it it) {
+            [t = &table.node_](std::future<std::string> fut, pending_result res) {
                 OBTAIN_FUT_MSG;
 
                 if(!std::memcmp(&m.magic, &proto::consts.magic, proto::magic_length) &&
@@ -32,19 +35,19 @@ void bucket::update(routing_table& table, peer req, bool nearby) {
                     m.reply == proto::context::response) {
                     {
                         LOCK(t->table.mutex);
-                        t->table.update_pending(req);
+                        t->table.update_pending(res.req);
                     }
 
                     spdlog::debug("responded, updating");
                 }
             },
-            [t = &table.node_](std::future<std::string> fut, peer req, pend_it it) {
+            [t = &table.node_](std::future<std::string> fut, pending_result res) {
                 {
                     LOCK(t->table.mutex);
                     int s;
-                    if((s = t->table.stale(req)) > proto::missed_pings_allowed) {
-                        t->table.evict(req);
-                        spdlog::debug("did not respond, evicting {}", util::htos(req.id));
+                    if((s = t->table.stale(res.req)) > proto::missed_pings_allowed) {
+                        t->table.evict(res.req);
+                        spdlog::debug("did not respond, evicting {}", util::htos(res.req.id));
                     } else if(s != -1) {
                         spdlog::debug("did not respond. staleness: {}", s);
                     }

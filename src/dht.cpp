@@ -8,10 +8,10 @@ namespace tulip {
 
 /// @brief initialize tulip node
 node::node() :
-    dht::node(dht::proto::Mport, dht::proto::Rport) { start(); }
+    node(dht::proto::Mport, dht::proto::Rport) { start(); rp_node_.start(); }
 
 node::node(u16 m, u16 r) :
-    dht::node(m, r) { start(); }
+    dht::node(m, r) { start(); rp_node_.start(); }
 
 /// @brief do nothing
 void node::do_nothing(dht::peer) { }
@@ -24,14 +24,21 @@ dht::hash_t node::own_id() { return id; }
 /// @param ok_fn success callback
 /// @param bad_fn failure callback
 void node::ping(dht::peer p, c_callback ok_fn, c_callback bad_fn) {
-    send(p, dht::proto::actions::ping, 0,
-        [ok_fn, this](std::future<std::string> fut, dht::peer p_, dht::pend_it pit) {
-            okay<dht::proto::actions::ping>(std::move(fut), p_, pit);
-            ok_fn(p_);
+    using namespace dht;
+
+    send(true, 
+        proto::context::request, 
+        proto::responses::ok, 
+        p, 
+        proto::actions::ping, 
+        0,
+        [ok_fn, this](std::future<std::string> fut, pending_result res) {
+            okay<proto::actions::ping>(std::move(fut), res);
+            ok_fn(res.req);
         },
-        [bad_fn, this](std::future<std::string> fut, dht::peer p_, dht::pend_it pit) {
-            bad<dht::proto::actions::ping>(std::move(fut), p_, pit);
-            bad_fn(p_);
+        [bad_fn, this](std::future<std::string> fut, pending_result res) {
+            bad<proto::actions::ping>(std::move(fut), res);
+            bad_fn(res.req);
         });
 }
 
@@ -41,58 +48,102 @@ void node::ping(dht::peer p, c_callback ok_fn, c_callback bad_fn) {
 /// @param ok_fn success callback
 /// @param bad_fn failure callback
 void node::find_node(dht::peer p, dht::hash_t h, bkt_callback ok_fn, c_callback bad_fn) {
-    dht::id_t a, m_id;
-    dht::util::btoh(h, a);
-    dht::util::msg_id(reng, m_id);
+    using namespace dht;
 
-    dht::hash_t h_ = send(p, dht::proto::actions::find_node, dht::proto::u32_hash_width, 
-        [&](std::future<std::string> fut, dht::peer, dht::pend_it pit) {
+    id_t a, m_id;
+    util::btoh(h, a);
+    util::msg_id(reng, m_id);
+
+    // send initial request and await a first ack response
+    hash_t h_ = send(
+        true,
+        proto::context::request,
+        proto::responses::ok,
+        p, 
+        proto::actions::find_node, 
+        proto::u32_hash_width, 
+        [this, a, ok_fn, bad_fn](std::future<std::string> fut, pending_result res) {
             using namespace dht;
             OBTAIN_FUT_MSG;
+        
+            // prepare target ID buffer
+            std::string a_;
+            a_.resize(proto::u32_hash_width * sizeof(u32));
+            std::memcpy((void*)a_.c_str(), a, proto::u32_hash_width * sizeof(u32));
+         
+            // send target ID to find over TCP
+            peer r = res.req;
+            hash_t m_id = res.msg_id;
 
-            // we now have an id for this peer
-            p.id = util::htob(m.id);
+            // await a UDP response detailing size
+            await(r, m_id, proto::actions::find_node, false,
+                [this, ok_fn, bad_fn](std::future<std::string> fut, pending_result res) {
+                    // await the TCP response with bucket
+                    await(res.req, res.msg_id, proto::actions::find_node, true,
+                        [this, ok_fn, bad_fn](std::future<std::string> fut, pending_result res) {
+                            // reply with an ack
+                            send(
+                                false,
+                                proto::context::response,
+                                proto::responses::ok,
+                                res.req, 
+                                proto::actions::ack, 
+                                0, 
+                                res.msg_id, 
+                                p_do_nothing, 
+                                p_do_nothing);
+
+                            std::stringstream ss;
+                            std::string f = fut.get();
+                            bucket bkt;
+
+                            ss << f;
+
+                            try {
+                                {
+                                    boost::archive::binary_iarchive bia(ss);
+                                    bia >> bkt;
+                                }
+
+                                ok_fn(res.req, std::move(bkt));
+                            } catch (std::exception& e) {
+                                spdlog::error("could not deserialize bucket, ec: {}", e.what());
+                                bad<proto::actions::find_node>(std::move(fut), res);
+                                bad_fn(res.req);
+                            }
+                        },
+                        [this, ok_fn, bad_fn](std::future<std::string> fut, pending_result res) {
+                            spdlog::error("did not get tcp response with bucket from {}:{}:{}", res.req.addr, res.req.port, res.req.reply_port);
+                            bad<proto::actions::find_node>(std::move(fut), res);
+                            bad_fn(res.req);
+                        });
+                        
+                    // send second ack response 
+                    send(
+                        false, 
+                        proto::context::response,
+                        proto::responses::ok,
+                        res.req, 
+                        proto::actions::find_node, 
+                        0,
+                        res.msg_id, 
+                        p_do_nothing, 
+                        p_do_nothing);
+                },
+                [this, ok_fn, bad_fn](std::future<std::string> fut, pending_result res) {
+                    spdlog::error("did not get udp response detailing size from {}:{}:{}", res.req.addr, res.req.port, res.req.reply_port);
+                    bad<proto::actions::find_node>(std::move(fut), res);
+                    bad_fn(res.req);
+                });
+
+            // send target ID over tcp
+            rp_node_.send(res.req, res.msg_id, a_, se_do_nothing, se_do_nothing);
         },
-        [bad_fn, this](std::future<std::string> fut, dht::peer p_, dht::pend_it pit) {
-            bad<dht::proto::actions::find_node>(std::move(fut), p_, pit);
-            bad_fn(p_);
+        [bad_fn, this](std::future<std::string> fut, pending_result res) {
+            spdlog::error("did not get first ack from udp from {}:{}:{}", res.req.addr, res.req.port, res.req.reply_port);
+            bad<proto::actions::find_node>(std::move(fut), res);
+            bad_fn(res.req);
         });
-
-    std::string a_;
-    a_.resize(dht::proto::u32_hash_width * sizeof(u32));
-    std::memcpy((void*)a_.c_str(), a, dht::proto::u32_hash_width * sizeof(u32));
-
-    rp_node_.send(p, h_, a_, se_do_nothing, se_do_nothing);
-
-    queue(p, h_, dht::proto::actions::find_node, true,
-        [h_, ok_fn, bad_fn, this](std::future<std::string> fut_, dht::peer p_, dht::pend_it pit_) {
-            std::stringstream ss;
-            std::string f = fut_.get();
-            dht::bucket bkt;
-
-            ss << f;
-
-            try {
-                {
-                    boost::archive::binary_iarchive bia(ss);
-                    bia >> bkt;
-                }
-
-                // send an ack back
-                reply(p_, dht::proto::actions::ack, h_, 0, p_do_nothing, p_do_nothing);
-
-                ok_fn(p_, std::move(bkt));
-            } catch (std::exception& e) {
-                spdlog::error("could not deserialize bucket, ec: {}", e.what());
-                bad<dht::proto::actions::find_node>(std::move(fut_), p_, pit_);
-                bad_fn(p_);
-            }
-        },
-        [bad_fn, this](std::future<std::string> fut_, dht::peer p_, dht::pend_it pit_) {
-            bad<dht::proto::actions::find_node>(std::move(fut_), p_, pit_);
-            bad_fn(p_);
-        }
-    );
 }
 
 /*

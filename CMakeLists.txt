@@ -59,4 +59,4 @@ target_include_directories(
 	"${PROJECT_SOURCE_DIR}/extern"
 )
 
-target_link_libraries(dht PUBLIC Boost::system Boost::serialization spdlog::spdlog pthread) #-g -fsanitize=undefined,address)
+target_link_libraries(dht PUBLIC Boost::system Boost::serialization spdlog::spdlog pthread)#-g -fsanitize=undefined,address)

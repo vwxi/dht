@@ -17,6 +17,9 @@
 .history
 .ionide
 
+# clangd
+.cache/
+
 
 ### Vim ###
 # Swap

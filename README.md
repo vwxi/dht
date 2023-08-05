@@ -26,7 +26,7 @@ cmake --build .
 
 ## list of stuff to do
 
-- lookup algorithm
 - store
 - find_value
+- refresh
 - testing interface

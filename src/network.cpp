@@ -32,7 +32,7 @@ namespace dht {
 /// @brief initialize a pending item
 /// @param req_ peer struct
 /// @param msg_id_ msg_id hash
-/// @param a queued action
+/// @param a action
 pending_item::pending_item(peer req_, hash_t msg_id_, proto::actions a, bool rp_) : 
     req(req_), msg_id(msg_id_), action(a), satisfied(false), rp(rp_) { }
 
@@ -40,124 +40,72 @@ pending_item::pending_item(peer req_, hash_t msg_id_, proto::actions a, bool rp_
 /// TCP functions
 /////////////////////////////////////////////////
 
-/// @private
-/// @brief initialize TCP peer
-/// @param peers_mutex_ mutex reference
-/// @param peers_ peer list reference
-/// @param sock socket object
-rp_node_peer::rp_node_peer(
-    rp_node& rp_node__, tcp::socket sock) :
-    rp_node_(rp_node__),
-    socket(std::move(sock)) { 
-    endpoint = socket.remote_endpoint();
-}
+rp_node_peer::rp_node_peer(rp_node& rp_node__, tcp::socket sock) :
+    rp_node_(rp_node__), socket(std::move(sock)), endpoint(socket.remote_endpoint()) { }
 
-rp_node_peer::rp_node_peer(
-    rp_node& rp_node__, tcp::endpoint ep) :
-    rp_node_(rp_node__),
-    socket(rp_node__.ioc, tcp::v4()) {
-    boost::system::error_code ec;
-    
-    socket.connect(ep, ec);
+rp_node_peer::rp_node_peer(rp_node& rp_node__, tcp::endpoint ep) :
+    rp_node_(rp_node__), socket(rp_node__.ioc), endpoint(ep) { }
 
-    if(ec) {
-        spdlog::error("tcp connect error: {}", ec.message());
-        throw std::runtime_error(fmt::format("tcp connect error: {}", ec.message()));
-    }
-
-    endpoint = socket.remote_endpoint();
-}
-
-/// @private
-/// @brief kill peer connection
-void rp_node_peer::kill() {
-    try {
-        socket.shutdown(socket.shutdown_both);
-        socket.close();
-        rp_node_.peers.erase(shared_from_this());
-    } catch (std::exception& e) { }
-}
-
-/// @private
-/// @brief handle peer connection
 void rp_node_peer::handle() {
     auto self(shared_from_this());
-
-    std::memset((void*)&m_in, 0, sizeof(proto::rp_msg));
 
     boost::asio::async_read(
         socket, 
         boost::asio::buffer((void*)&m_in, sizeof(proto::rp_msg)),
-        std::bind(&rp_node_peer::read_handler, shared_from_this(), _1, _2));
-}
+        [this, self](boost::system::error_code ec, std::size_t sz) {
+            hash_t id_ = util::htob(m_in.id);
 
-/// @private
-/// @brief just a handler
-void rp_node_peer::read_handler(const boost::system::error_code& ec, std::size_t sz) {
-    // correct magic, under size limit, messaging port is valid
-    hash_t id_ = util::htob(m_in.id);
+            if(ec || 
+                sz != sizeof(proto::rp_msg) ||
+                std::memcmp(m_in.magic, proto::consts.magic, proto::magic_length) ||
+                m_in.sz > proto::max_data_size ||
+                id_ == hash_t(0)) { 
+                return; 
+            }
 
-    if(ec || 
-        sz != sizeof(proto::rp_msg) ||
-        std::memcmp(m_in.magic, proto::consts.magic, proto::magic_length) ||
-        m_in.sz > proto::max_data_size ||
-        !(m_in.msg_port > 0 && m_in.msg_port < 65536) ||
-        !(m_in.reply_port > 0 && m_in.reply_port < 65536) ||
-        id_ == hash_t(0)) { 
-        kill();
-        return; 
-    }
+            spdlog::debug("rp_msg from {}:{} (mp: {}) msg {}", 
+                endpoint.address().to_string(), 
+                endpoint.port(), 
+                m_in.msg_port, 
+                util::htos(util::htob(m_in.msg_id)));
 
-    rp_node_.peers.insert(std::move(shared_from_this()));
+            peer req(endpoint.address().to_string(), m_in.msg_port, m_in.reply_port, id_);
 
-    spdlog::debug("rp_msg from {}:{} (mp: {}) msg {}", 
-        endpoint.address().to_string(), 
-        endpoint.port(), 
-        m_in.msg_port, 
-        util::htos(util::htob(m_in.msg_id)));
+            auto it = rp_node_.node_.pending.end();
 
-    peer req(endpoint.address().to_string(), m_in.msg_port, m_in.reply_port, id_);
-
-    auto it = rp_node_.node_.pending.end();
-    
-    {
-        LOCK(rp_node_.node_.pending_mutex);
-
-        it = std::find_if(rp_node_.node_.pending.begin(), rp_node_.node_.pending.end(),
-            [&](pending_item& i) { 
-                return i.req == req && 
-                i.msg_id == util::htob(m_in.msg_id) && 
-                i.rp == true; });
-    }
-
-    // ignore if data isn't even in pending list
-    if(it == rp_node_.node_.pending.end()) { 
-        kill();
-        return; 
-    }
-
-    buf.clear();
-    buf.resize(m_in.sz);
-
-    auto self(shared_from_this());
-    boost::asio::async_read(
-        socket,
-        boost::asio::buffer(buf),
-        [this, self, it](boost::system::error_code ec, std::size_t sz) {
-            if((!ec || ec == boost::asio::error::eof) && sz == m_in.sz) {
+            {
                 LOCK(rp_node_.node_.pending_mutex);
 
-                if(!it->satisfied)
-                    it->promise.set_value(buf);
-                it->satisfied = true;
-            } else {
-                kill();
+                it = std::find_if(rp_node_.node_.pending.begin(), rp_node_.node_.pending.end(),
+                    [&](pending_item& i) { 
+                        return i.req == req && 
+                        i.msg_id == util::htob(m_in.msg_id) && 
+                        i.rp == true; });
             }
+
+            // ignore if data isn't even in pending list
+            if(it == rp_node_.node_.pending.end())
+                return; 
+
+            buf.clear();
+            buf.resize(m_in.sz);
+
+            boost::asio::async_read(
+                socket,
+                boost::asio::buffer(buf),
+                [this, self, it](boost::system::error_code ec, std::size_t sz) {
+                    if((!ec || ec == boost::asio::error::eof) && sz == m_in.sz) {
+                        LOCK(rp_node_.node_.pending_mutex);
+
+                        if(!it->satisfied)
+                            it->promise.set_value(buf);
+
+                        it->satisfied = true;
+                    }
+                });
         });
 }
 
-/// @private
-/// @brief write to socket
 void rp_node_peer::write(
     proto::rp_msg out, 
     std::string s, 
@@ -166,29 +114,37 @@ void rp_node_peer::write(
     se_callback bad_fn) {
     auto self(shared_from_this());
 
-    boost::asio::async_write(socket, 
-        boost::asio::buffer((void*)&out, sizeof(proto::rp_msg)),
-        [this, self, str = std::move(s), req, ok_fn, bad_fn](boost::system::error_code ec, std::size_t) {
-            if(ec) { 
-                spdlog::error("could not send hdr to rp, ec: {}", ec.message()); 
-                kill();
-                bad_fn(req);
-                return;
-            }
+    tcp::endpoint ep = req.rp_to_tcp_endpoint();
 
-            boost::asio::async_write(socket, boost::asio::buffer(str),
-                [this, ok_fn, bad_fn, req](boost::system::error_code ec_, std::size_t sz) {
-                    if(ec_) { 
-                        spdlog::error("could not send data to rp, ec: {}", ec_.message()); 
-                        kill();
-                        bad_fn(req);
-                        return;
-                    }
+    socket.async_connect(ep, [this, self, out, s, req, ok_fn, bad_fn](boost::system::error_code er) {
+        if(er) {
+            spdlog::error("could not connect to rp, ec: {}", er.message());
+            bad_fn(req);
+            return;
+        }
 
-                    ok_fn(req);
+        boost::asio::async_write(socket, 
+            boost::asio::buffer((void*)&out, sizeof(proto::rp_msg)),
+            [this, self, s, req, ok_fn, bad_fn](boost::system::error_code ec, std::size_t) {
+                if(ec) { 
+                    spdlog::error("could not send hdr to rp {}:{}, ec: {}", endpoint.address().to_string(), endpoint.port(), ec.message()); 
+                    bad_fn(req);
+                    return;
                 }
-            );
-        });
+
+                boost::asio::async_write(socket, boost::asio::buffer(s),
+                    [this, ok_fn, bad_fn, req](boost::system::error_code ec_, std::size_t sz) {
+                        if(ec_) { 
+                            spdlog::error("could not send data to rp {}:{}, ec: {}", endpoint.address().to_string(), endpoint.port(), ec_.message()); 
+                            bad_fn(req);
+                            return;
+                        }
+
+                        ok_fn(req);
+                    }
+                );
+            });
+    });
 }
 
 /////////////////////////////////////////////////
@@ -201,41 +157,39 @@ void rp_node_peer::write(
 /// @param pending_mutex_ mutex reference
 /// @param pending_ pending list reference
 /// @param port_ port to bind to (cannot be same port as UDP)
-rp_node::rp_node(
-    boost::asio::io_context& ioc_, 
-    node& node__,
-    u16 port_) :
+rp_node::rp_node(node& node__, u16 port_) :
     port(port_),
-    ioc(ioc_),
     node_(node__),
-    acceptor(ioc_, tcp::endpoint(tcp::v4(), port_)) { }
+    acceptor(ioc, tcp::endpoint(tcp::v4(), port_)) { }
 
-/// @private
-/// @brief main event loop for TCP socket
-void rp_node::run() {
-    acceptor.async_accept(
-        [this](boost::system::error_code ec, tcp::socket sock) {
-            if(!ec)
-                std::make_shared<rp_node_peer>(*this, std::move(sock))->handle();
-
-            run();
-        }
-    );
+rp_node::~rp_node() {
+    ioc_thread.join();
 }
 
-/// @private
-/// @brief send data to peer
-/// @note this will be a blocking operation on purpose (reconsider?)
-/// @note also, if we're using this function, we're answering a request
-/// @param req peer struct
-/// @param s data to send
+void rp_node::loop() {
+    acceptor.async_accept([&, this](boost::system::error_code ec, tcp::socket sock) {
+        if(!ec) {
+            std::make_shared<rp_node_peer>(*this, std::move(sock))->handle();
+        }
+
+        loop();
+    });
+}
+
+void rp_node::start() {
+    loop();
+    ioc_thread = std::thread([&, this]() { 
+        auto w = boost::asio::make_work_guard(ioc);
+        ioc.run(); 
+    });
+}
+
 void rp_node::send(
     peer req, 
     hash_t msg_id, 
     std::string s,
     se_callback ok_fn, 
     se_callback bad_fn) {
-    spdlog::debug("sending peer {} ({}:{}) data", util::htos(req.id), req.addr, req.reply_port);
 
     boost::system::error_code ec;
 
@@ -276,11 +230,11 @@ void rp_node::send(
 /// @brief initialize a new node
 /// @param port_ UDP port number
 /// @param rp_port TCP port number
-node::node(u16 port_, u16 rp_port) : 
+node::node(u16 port_, u16 rp_port) :
     port(port_), 
     socket(ioc, udp::endpoint(udp::v4(), port_)), 
     table(id, *this),
-    rp_node_(ioc, *this, rp_port),
+    rp_node_(*this, rp_port),
     reng(rd()) {
     spdlog::info("messaging at addr {} on port {}, data transfer on port {}", 
         socket.local_endpoint().address().to_string(), port, rp_port);
@@ -289,15 +243,12 @@ node::node(u16 port_, u16 rp_port) :
 }
 
 node::~node() {
-    tcp_thread.join();
-    udp_thread.join();
+    ioc_thread.join();
 }
 
 void node::start() {
-    run();
-
-    tcp_thread = std::thread([&, this]() { rp_node_.run(); });
-    udp_thread = std::thread([&, this]() { ioc.run(); });
+    loop();
+    ioc_thread = std::thread([&, this]() { ioc.run(); });
 }
 
 /////////////////////////////////////////////////
@@ -305,10 +256,7 @@ void node::start() {
 /////////////////////////////////////////////////
 
 template <>
-void node::okay<proto::actions::ping>(
-    std::future<std::string> fut, 
-    peer req, 
-    pend_it it) {
+void node::okay<proto::actions::ping>(std::future<std::string> fut, pending_result res) {
     OBTAIN_FUT_MSG;
                         
     if(!std::memcmp(m.magic, proto::consts.magic, proto::magic_length) &&
@@ -316,10 +264,10 @@ void node::okay<proto::actions::ping>(
         m.reply == proto::context::response) {
         {
             // we now have an id for this peer
-            req.id = util::htob(m.id);
+            res.req.id = util::htob(m.id);
             
             LOCK(table.mutex);
-            table.update(req);
+            table.update(res.req);
         }
 
         spdlog::debug("responded, updating");
@@ -327,16 +275,13 @@ void node::okay<proto::actions::ping>(
 }
 
 template <>
-void node::bad<proto::actions::ping>(
-    std::future<std::string> fut, 
-    peer req, 
-    pend_it it) {
+void node::bad<proto::actions::ping>(std::future<std::string> fut, pending_result res) {
     {
         LOCK(table.mutex);
         int s;
-        if((s = table.stale(req)) > proto::missed_pings_allowed) {
-            table.evict(req);
-            spdlog::debug("did not respond, evicting {}", util::htos(req.id));
+        if((s = table.stale(res.req)) > proto::missed_pings_allowed) {
+            table.evict(res.req);
+            spdlog::debug("did not respond, evicting {}", util::htos(res.req.id));
         } else if(s != -1) {
             spdlog::debug("did not respond. staleness: {}", s);
         }
@@ -344,11 +289,9 @@ void node::bad<proto::actions::ping>(
 }
 
 template <>
-void node::bad<proto::actions::find_node>(
-    std::future<std::string> fut, 
-    peer req, 
-    pend_it it) {
-    spdlog::debug("node {}:{}:{} id {} did not send find_node information", req.addr, req.port, req.reply_port, util::htos(req.id));
+void node::bad<proto::actions::find_node>(std::future<std::string> fut, pending_result res) {
+    spdlog::debug("node {}:{}:{} id {} did not send find_node information", 
+        res.req.addr, res.req.port, res.req.reply_port, util::htos(res.req.id));
 }
 
 /////////////////////////////////////////////////
@@ -356,14 +299,14 @@ void node::bad<proto::actions::find_node>(
 /////////////////////////////////////////////////
 
 /// @private
-/// @brief queue current peer into pending list
+/// @brief await current peer's response
 /// @param req peer struct
 /// @param msg_id message id
-/// @param a action to queue under
+/// @param a action to await under
 /// @param rp is this on reply port (TCP, true) or message port (UDP, false) ?
 /// @param ok_fn success callback
 /// @param bad_fn failure callback
-void node::queue(
+void node::await(
     peer req, 
     hash_t msg_id, 
     proto::actions a, 
@@ -379,23 +322,22 @@ void node::queue(
     std::thread(
         &node::wait, 
         this, 
-        req, 
         pit, 
         ok_fn,
         bad_fn).detach();
 }
 
 /// @private
-/// @brief queue an ack response
+/// @brief await an ack response
 /// @param req peer struct
 /// @param msg_id message id
-void node::queue_ack(peer req, hash_t msg_id) {
+void node::await_ack(peer req, hash_t msg_id) {
     // NOTE: we don't really need an ACK packet, just to ensure the data was sent completely for UI
-    queue(req,
+    await(req,
         util::htob(m_in.msg_id),
         proto::actions::ack,
         false,
-        [this](std::future<std::string> fut, peer req, pend_it it) {
+        [this](std::future<std::string> fut, pending_result res) {
             LOCK(pending_mutex);
             OBTAIN_FUT_MSG;
             
@@ -408,111 +350,130 @@ void node::queue_ack(peer req, hash_t msg_id) {
                 spdlog::debug("we didnt get a proper ack back");
             }
         },
-        [this](std::future<std::string> fut, peer req, pend_it it) {
+        [this](std::future<std::string> fut, pending_result res) {
             spdlog::error("we did not get an ack back or the peer sent bad data for find_node");
         });
 }
 
 /// @private
 /// @brief send whatever's in m_out to peer
+/// @param q do we await?
 /// @param req peer struct
 /// @param a action
 /// @param ok_fn success callback
 /// @param bad_fn failure callback
 /// @return msg id of sent message
-hash_t node::send(peer req, proto::actions a, p_callback ok_fn, p_callback bad_fn) {
-    // don't double send
-    {
-        LOCK(pending_mutex);
-        auto it = std::find_if(pending.begin(), pending.end(),
-            [&](pending_item& i) { 
-                return i.req == req && 
-                    i.msg_id == util::htob(m_out.msg_id) && 
-                    i.action == a; });
-
-        if(it != pending.end()) return hash_t(0);
-    }
-
+hash_t node::send(
+    bool q,
+    proto::context c, 
+    peer req, 
+    proto::actions a, 
+    p_callback ok_fn, 
+    p_callback bad_fn) {
     hash_t orig_id(0);
-    
-    {
-        LOCK(m_out_mutex);
-        orig_id = util::htob(m_out.msg_id);
-    
-        queue(req, orig_id, a, false, ok_fn, bad_fn);
 
-        socket.async_send_to(
-            boost::asio::buffer(&m_out, sizeof(proto::msg)), 
-            udp::endpoint{
-                boost::asio::ip::address::from_string(req.addr),
-                req.port},
-            ba_do_nothing);
-    }
+    LOCK(m_out_mutex);    
+    
+    orig_id = util::htob(m_out.msg_id);
+
+    if(q)
+        await(req, orig_id, a, false, ok_fn, bad_fn);
+
+    socket.async_send_to(
+        boost::asio::buffer(&m_out, sizeof(proto::msg)), 
+        req.to_udp_endpoint(),
+        ba_do_nothing);
     
     return orig_id;
 }
 
 /// @private
 /// @brief send a message over UDP to a peer
+/// @param q do we await a response?
+/// @param c what context is this? (request, response)
+/// @param r response code
 /// @param req peer struct
 /// @param a request action
 /// @param sz size of payload (0 for messages only)
 /// @param ok_fn callback for success
 /// @param bad_fn callback for failure (timeout, error, etc.)
 /// @return msg id of sent message
-hash_t node::send(peer req, proto::actions a, u64 sz, p_callback ok_fn, p_callback bad_fn) {
+hash_t node::send(
+    bool q, 
+    proto::context c, 
+    proto::responses r,
+    peer req, 
+    proto::actions a, 
+    u64 sz, 
+    p_callback ok_fn, 
+    p_callback bad_fn) {
     id_t id_ = {0}; util::btoh(id, id_);
- 
+    
     {
         LOCK(m_out_mutex); 
 
         m_out = {
             .action = (u8)a,
-            .reply = proto::context::request,
-            .response = proto::responses::ok,
+            .reply = (u8)c,
+            .response = (u8)r,
             .msg_port = port,
             .reply_port = rp_node_.port,
             .sz = sz
         };
-
-        std::memcpy(&m_out.magic, proto::consts.magic, proto::magic_length);
+    
+        std::memcpy(m_out.magic, proto::consts.magic, proto::magic_length);
         std::memcpy(m_out.id, id_, proto::u32_hash_width * sizeof(u32));
         util::msg_id(reng, m_out.msg_id);
     }
 
-    return send(req, a, ok_fn, bad_fn);
+    return send(q, c, req, a, ok_fn, bad_fn);
 }
 
 /// @private
-/// @brief reply to a message over UDP to a peer specifying the msg id
+/// @brief send a message over UDP to a peer with a specified message ID
+/// @param q do we await a response?
+/// @param c what context is this? (request, response)
+/// @param r response code
 /// @param req peer struct
 /// @param a request action
-/// @param msg_id msg id
 /// @param sz size of payload (0 for messages only)
+/// @param msg_id message ID
 /// @param ok_fn callback for success
 /// @param bad_fn callback for failure (timeout, error, etc.)
 /// @return msg id of sent message
-hash_t node::reply(peer req, proto::actions a, hash_t msg_id, u64 sz, p_callback ok_fn, p_callback bad_fn) {
-    id_t id_ = {0}; util::btoh(id, id_);
+hash_t node::send(
+    bool q, 
+    proto::context c, 
+    proto::responses r,
+    peer req, 
+    proto::actions a, 
+    u64 sz, 
+    hash_t msg_id,
+    p_callback ok_fn, 
+    p_callback bad_fn) {
+    id_t id_ = {0}, msg_id_ = {0}; 
     
+    util::btoh(id, id_);
+    util::btoh(msg_id, msg_id_);
+
     {
-        LOCK(m_out_mutex);
+        LOCK(m_out_mutex); 
 
         m_out = {
             .action = (u8)a,
-            .reply = proto::context::response,
-            .response = proto::responses::ok,
+            .reply = (u8)c,
+            .response = (u8)r,
             .msg_port = port,
             .reply_port = rp_node_.port,
             .sz = sz
         };
-
-        std::memcpy(&m_out.magic, proto::consts.magic, proto::magic_length);
+    
+        std::memcpy(m_out.magic, proto::consts.magic, proto::magic_length);
         std::memcpy(m_out.id, id_, proto::u32_hash_width * sizeof(u32));
-        util::btoh(msg_id, m_out.msg_id);
+        std::memcpy(m_out.msg_id, msg_id_, proto::u32_hash_width * sizeof(u32));
     }
 
-    return send(req, a, ok_fn, bad_fn);
+    return send(q, c, req, a, ok_fn, bad_fn);
 }
 
 /// @private
@@ -522,43 +483,45 @@ hash_t node::reply(peer req, proto::actions a, hash_t msg_id, u64 sz, p_callback
 /// @param ok_fn callback for success
 /// @param bad_fn callback for failure
 void node::wait(
-    peer req, 
     pend_it it,
     p_callback ok_fn,
     p_callback bad_fn) {
     try {
+        pending_result res(*it);
+
         {
             LOCK(pending_mutex);
             if(it == pending.end()) {
                 spdlog::error("wait: bad iterator!");
-                bad_fn(std::future<std::string>(), req, it);
+                bad_fn(std::future<std::string>(), res);
                 return;
             }
         }
 
         std::future<std::string> fut = it->promise.get_future();
-
-        switch(fut.wait_for(seconds(proto::net_timeout))) {
-        case std::future_status::ready:
-            ok_fn(std::move(fut), req, it);
-            break;
-
-        case std::future_status::deferred:
-        case std::future_status::timeout:
-            bad_fn(std::move(fut), req, it);
-            break;
-        }
+        std::future_status fs = fut.wait_for(seconds(proto::net_timeout));
 
         {
             LOCK(pending_mutex);
             pending.erase(it);
         }
+        
+        switch(fs) {
+        case std::future_status::ready:
+            ok_fn(std::move(fut), res);
+            break;
+
+        case std::future_status::deferred:
+        case std::future_status::timeout:
+            bad_fn(std::move(fut), res);
+            break;
+        }
     } catch(std::future_error& e) {
         if(e.code() == std::future_errc::future_already_retrieved) {
             LOCK(table.mutex);
-            table.update_pending(req);
+            table.update_pending(it->req);
 
-            spdlog::debug("already responded, updating node {}", util::htos(req.id));
+            spdlog::debug("already responded, updating node {}", util::htos(it->req.id));
         }
     }
 }
@@ -576,7 +539,8 @@ void node::reply<proto::actions::ping>(peer req) {
     socket.async_send_to(
         boost::asio::buffer((void*)&m_out, sizeof(proto::msg)), 
         req.to_udp_endpoint(),
-        [&](boost::system::error_code ec, std::size_t sz) { });
+        ba_do_nothing
+    );
 
     table.update(req);
 }
@@ -585,21 +549,29 @@ void node::reply<proto::actions::ping>(peer req) {
 /// @param req peer struct
 template <>
 void node::reply<proto::actions::find_node>(peer req) {
+    // send first msg ack back
     MAKE_MSG(find_node, response, ok)
 
+    socket.async_send_to(
+        boost::asio::buffer((void*)&m_out, sizeof(proto::msg)),
+        req.to_udp_endpoint(),
+        ba_do_nothing
+    );
+
     // drop request if there's no tcp data to recv
-    if(m_in.sz <= 0)
+    if(m_in.sz <= 0) {
         return;
+    }
 
     hash_t orig_id = util::htob(m_in.msg_id);
 
-    // read node from tcp socket 
-    queue(
+    // await target ID over TCP
+    await(
         req,
         util::htob(m_in.msg_id),
         proto::actions::find_node,
         true,
-        [this, orig_id](std::future<std::string> fut, peer req, pend_it it) {    
+        [this, orig_id](std::future<std::string> fut, pending_result res) {
             std::stringstream ss;
 
             id_t id_ = {0};
@@ -620,24 +592,32 @@ void node::reply<proto::actions::find_node>(peer req) {
                 boa << bkt;
             }
 
-            m_out.sz = ss.tellp();
+            u64 sz = ss.tellp();
             str = ss.str();
 
             spdlog::debug("looked up node {}", util::htos(util::htob(id_)));
 
-            queue_ack(req, orig_id);
+            // send udp response detailing payload size
+            send(
+                true,
+                proto::context::response,
+                proto::responses::ok,
+                res.req, 
+                proto::actions::find_node,
+                sz,
+                res.msg_id,
+                [this, orig_id, str](std::future<std::string> fut, dht::pending_result res) {
+                    // this callback means we got a response ack back
+                    rp_node_.send(res.req, orig_id, str, se_do_nothing, se_do_nothing);
+                    
+                    // await a final ack
+                    await_ack(res.req, orig_id);
+                },
+                p_do_nothing);
+        },
+    std::bind(&node::bad<proto::actions::find_node>, this, _1, _2));
 
-            socket.async_send_to(
-                boost::asio::buffer((void*)&m_out, sizeof(proto::msg)), 
-                req.to_udp_endpoint(),
-                [this, req, s = std::move(str), orig_id](boost::system::error_code ec, std::size_t sz) {
-                    if((!ec || ec == boost::asio::error::eof) && sz == sizeof(proto::msg)) {
-                        rp_node_.send(req, orig_id, s, se_do_nothing, se_do_nothing);
-                    }
-                });
-            },
-        std::bind(&node::bad<proto::actions::find_node>, this, _1, _2, _3));
-    
+    // update peer in table regardless
     {
         LOCK(table.mutex);
         table.update(req);
@@ -649,54 +629,53 @@ void node::reply<proto::actions::find_node>(peer req) {
 /////////////////////////////////////////////////
 
 /// @brief event loop for UDP socket
-void node::run() {
+void node::loop() {
     socket.async_receive_from(boost::asio::buffer((void*)&m_in, sizeof(proto::msg)), client,
         [this](boost::system::error_code ec, std::size_t sz) {
             if((!ec || ec == boost::asio::error::eof) && sz == sizeof(proto::msg)) {
+                LOCK(m_in_mutex);
+
                 hash_t id_ = util::htob(m_in.id);
 
                 // correct magic, reply port is valid
                 if(std::memcmp(m_in.magic, proto::consts.magic, proto::magic_length) ||
-                    !(m_in.msg_port > 0 && m_in.msg_port < 65536) ||
-                    !(m_in.reply_port > 0 && m_in.reply_port < 65536) ||
-                    id_ == hash_t(0)) {
+                    id_ == hash_t(0))
                     goto o;
-                }
+
+#define r(a) case proto::actions::a: reply<proto::actions::a>(req); break;
 
                 peer req(client.address().to_string(), m_in.msg_port, m_in.reply_port, id_);
 
-                {
+                spdlog::debug("msg from {}:{} (rp: {}) id {} msg {} act {} resp? {}", 
+                    req.addr, req.port, req.reply_port, 
+                    util::htos(req.id), util::htos(util::htob(m_in.msg_id)), m_in.action, (bool)m_in.reply);
+
+                if (m_in.reply == proto::context::response) {
                     LOCK(pending_mutex);
 
                     // fulfill pending promise, if any
-                    auto pit = std::find_if(pending.begin(), pending.end(),
-                        [&](pending_item& i) { 
+                    auto it = std::find_if(pending.begin(), pending.end(),
+                        [&](pending_item& i) {
                             return i.req == req && 
                                 i.msg_id == util::htob(m_in.msg_id) && 
                                 i.action == m_in.action &&
-                                i.rp == false; });
+                                i.rp == false &&
+                                !i.satisfied; });
 
-                    if(pit != pending.end()) {
+                    if(it != pending.end()) {
                         std::string v;
                         v.resize(sizeof(proto::msg));
                         std::memcpy((void*)v.data(), &m_in, sizeof(proto::msg));
 
-                        if(!pit->satisfied)
-                            pit->promise.set_value(std::move(v));
-                        pit->satisfied = true;
+                        it->req = req;
+                        it->promise.set_value(std::move(v));
+                        it->satisfied = true;
 
                         // if you have a pending request, we will ignore you
                         if(m_in.reply == proto::context::request)
                             goto o;
                     }
-                }
-
-                spdlog::debug("msg from {}:{} (rp: {}) id {} msg {}", 
-                    req.addr, req.port, req.reply_port, 
-                    util::htos(req.id), util::htos(util::htob(m_in.msg_id)));
-
-#define r(a) case proto::actions::a: reply<proto::actions::a>(req); break;
-                if(!m_in.reply) {
+                } else {
                     try {
                         switch(m_in.action) {
                         r(ping) r(find_node)
@@ -705,10 +684,11 @@ void node::run() {
                         spdlog::error("exception caught: {}", e.what());
                     }
                 }
+
 #undef r
             }
 
-            o: run();
+            o: loop();
         });
 }
 
