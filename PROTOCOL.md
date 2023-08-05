@@ -75,9 +75,9 @@ the messaging port is the UDP port.
 
 | `struct msg`                 |
 |------------------------------|
-| magic (`u8` x `magic_length`)          |
-| id (`u32_hash_width`-`u32`s)             |
-| msg id (`u32_hash_width`-`u32`s)         |
+| magic (`u8` x `magic_length`)|
+| id (`u32_hash_width`-`u32`s) |
+| msg id (`u32_hash_width`-`u32`s)|
 | action (`u8` x 1)            |
 | context (`u8` x 1)           |
 | response (`u8` x 1)          |
@@ -93,8 +93,8 @@ the messaging port is the UDP port.
 
 | `struct rp_msg`              |
 |------------------------------|
-| magic (`u8` x `magic_length`)          |
-| id (`u32_hash_width`-`u32`s)    |
+| magic (`u8` x `magic_length`)|
+| id (`u32_hash_width`-`u32`s) |
 | msg id (`u32_hash_width`-`u32`s)|
 | messaging port (`u32` x 1)   |
 | reply-back port (`u32` x 1)  |
@@ -127,6 +127,17 @@ UDP         TCP    Action
 <-----             responder replies with ping msg response
 ```
 
+### store
+
+```
+UDP         TCP    Action
+----->             requester sends store msg with size
+<-----             responder replies with store msg ok response (no data)
+         ----->    requester sends rp_msg detailing payload size
+         ----->    requester sends serialized store_data
+<-----             responder replies with msg acknowledging (action: ack, context: response)
+```
+
 ### find_node
 
 ```
@@ -139,5 +150,5 @@ UDP         TCP    Action
 ----->             requester replies with details msg ok response (no data)
          <-----    responder sends rp_msg detailing payload size and other information
          <-----    responder sends actual payload (serialized bucket)
------>             requester replies with a msg acknowledging receival (action: ack, context: response)
+----->             requester replies with a msg acknowledging (action: ack, context: response)
 ```

@@ -70,6 +70,11 @@ struct rp_msg {
     u64 sz;
 };
 
+struct store_data {
+    id_t key;
+    std::string data;
+};
+
 }
 
 }

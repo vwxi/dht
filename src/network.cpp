@@ -10,25 +10,6 @@ namespace dht {
 /////////////////////////////////////////////////
 
 /// @private
-/// @brief private macro to fill message struct
-#define MAKE_MSG(a,R,r) \
-    id_t id_ = {0}; util::btoh(id, id_); \
-    { \
-        LOCK(m_out_mutex); \
-        m_out = { \
-            .action = proto::actions::a, \
-            .reply = proto::context::R, \
-            .response = proto::responses::r, \
-            .msg_port = port, \
-            .reply_port = rp_node_.port, \
-            .sz = 0 \
-        }; \
-        std::memcpy(m_out.magic, proto::consts.magic, proto::magic_length); \
-        std::memcpy(m_out.id, id_, proto::u32_hash_width * sizeof(u32)); \
-        std::memcpy(m_out.msg_id, m_in.msg_id, proto::u32_hash_width * sizeof(u32)); \
-    }
-
-/// @private
 /// @brief initialize a pending item
 /// @param req_ peer struct
 /// @param msg_id_ msg_id hash
@@ -299,6 +280,56 @@ void node::bad<proto::actions::find_node>(std::future<std::string> fut, pending_
 /////////////////////////////////////////////////
 
 /// @private
+/// @brief add message to pending list and start a thread to check for response
+/// @param req peer struct
+/// @param it iterator to item in pending list
+/// @param ok_fn callback for success
+/// @param bad_fn callback for failure
+void node::wait(
+    pend_it it,
+    p_callback ok_fn,
+    p_callback bad_fn) {
+    try {
+        pending_result res(*it);
+
+        {
+            LOCK(pending_mutex);
+            if(it == pending.end()) {
+                spdlog::error("wait: bad iterator!");
+                bad_fn(std::future<std::string>(), res);
+                return;
+            }
+        }
+
+        std::future<std::string> fut = it->promise.get_future();
+        std::future_status fs = fut.wait_for(seconds(proto::net_timeout));
+
+        {
+            LOCK(pending_mutex);
+            pending.erase(it);
+        }
+        
+        switch(fs) {
+        case std::future_status::ready:
+            ok_fn(std::move(fut), res);
+            break;
+
+        case std::future_status::deferred:
+        case std::future_status::timeout:
+            bad_fn(std::move(fut), res);
+            break;
+        }
+    } catch(std::future_error& e) {
+        if(e.code() == std::future_errc::future_already_retrieved) {
+            LOCK(table.mutex);
+            table.update_pending(it->req);
+
+            spdlog::debug("already responded, updating node {}", util::htos(it->req.id));
+        }
+    }
+}
+
+/// @private
 /// @brief await current peer's response
 /// @param req peer struct
 /// @param msg_id message id
@@ -326,6 +357,7 @@ void node::await(
         ok_fn,
         bad_fn).detach();
 }
+
 
 /// @private
 /// @brief await an ack response
@@ -476,56 +508,6 @@ hash_t node::send(
     return send(q, c, req, a, ok_fn, bad_fn);
 }
 
-/// @private
-/// @brief add message to pending list and start a thread to check for response
-/// @param req peer struct
-/// @param it iterator to item in pending list
-/// @param ok_fn callback for success
-/// @param bad_fn callback for failure
-void node::wait(
-    pend_it it,
-    p_callback ok_fn,
-    p_callback bad_fn) {
-    try {
-        pending_result res(*it);
-
-        {
-            LOCK(pending_mutex);
-            if(it == pending.end()) {
-                spdlog::error("wait: bad iterator!");
-                bad_fn(std::future<std::string>(), res);
-                return;
-            }
-        }
-
-        std::future<std::string> fut = it->promise.get_future();
-        std::future_status fs = fut.wait_for(seconds(proto::net_timeout));
-
-        {
-            LOCK(pending_mutex);
-            pending.erase(it);
-        }
-        
-        switch(fs) {
-        case std::future_status::ready:
-            ok_fn(std::move(fut), res);
-            break;
-
-        case std::future_status::deferred:
-        case std::future_status::timeout:
-            bad_fn(std::move(fut), res);
-            break;
-        }
-    } catch(std::future_error& e) {
-        if(e.code() == std::future_errc::future_already_retrieved) {
-            LOCK(table.mutex);
-            table.update_pending(it->req);
-
-            spdlog::debug("already responded, updating node {}", util::htos(it->req.id));
-        }
-    }
-}
-
 /////////////////////////////////////////////////
 /// UDP node message handlers
 /////////////////////////////////////////////////
@@ -534,13 +516,16 @@ void node::wait(
 /// @param req peer struct
 template <>
 void node::reply<proto::actions::ping>(peer req) {
-    MAKE_MSG(ping, response, ok)
-
-    socket.async_send_to(
-        boost::asio::buffer((void*)&m_out, sizeof(proto::msg)), 
-        req.to_udp_endpoint(),
-        ba_do_nothing
-    );
+    send(
+        false, 
+        proto::context::response, 
+        proto::responses::ok, 
+        req, 
+        proto::actions::ping,
+        0, 
+        util::htob(m_in.msg_id),
+        p_do_nothing, 
+        p_do_nothing);
 
     table.update(req);
 }
@@ -550,18 +535,20 @@ void node::reply<proto::actions::ping>(peer req) {
 template <>
 void node::reply<proto::actions::find_node>(peer req) {
     // send first msg ack back
-    MAKE_MSG(find_node, response, ok)
-
-    socket.async_send_to(
-        boost::asio::buffer((void*)&m_out, sizeof(proto::msg)),
-        req.to_udp_endpoint(),
-        ba_do_nothing
-    );
+    send(
+        false, 
+        proto::context::response, 
+        proto::responses::ok, 
+        req, 
+        proto::actions::find_node,
+        0, 
+        util::htob(m_in.msg_id),
+        p_do_nothing, 
+        p_do_nothing);
 
     // drop request if there's no tcp data to recv
-    if(m_in.sz <= 0) {
+    if(m_in.sz <= 0)
         return;
-    }
 
     hash_t orig_id = util::htob(m_in.msg_id);
 
