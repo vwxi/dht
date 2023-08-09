@@ -22,6 +22,8 @@ if(NOT TARGET Boost::serialization)
 	set_property(TARGET Boost::serialization PROPERTY INTERFACE_LINK_LIBRARIES ${Boost_LIBARIES})
 endif()
 
+find_package(msgpack-cxx REQUIRED)
+
 find_package(Git QUIET)
 if(GIT_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")
 # Update submodules as needed
@@ -52,6 +54,8 @@ add_executable(
 	src/dht.cpp
 )
 
+#add_compile_options(-fsanitize=address,undefined)
+
 target_include_directories(
 	${PROJECT_NAME} PUBLIC
 	"${PROJECT_BINARY_DIR}"
@@ -59,4 +63,4 @@ target_include_directories(
 	"${PROJECT_SOURCE_DIR}/extern"
 )
 
-target_link_libraries(dht PUBLIC Boost::system Boost::serialization spdlog::spdlog pthread)#-g -fsanitize=undefined,address)
+target_link_libraries(dht PUBLIC Boost::system Boost::serialization spdlog::spdlog pthread msgpack-cxx)
