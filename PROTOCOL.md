@@ -2,17 +2,6 @@
 
 this document will detail the information send between nodes on the network.
 
-## size definitions
-
-for the sake of brevity,  
-
-```
-typedef unsigned long long int u64;
-typedef unsigned long int u32;
-typedef unsigned short u16;
-typedef unsigned char u8;
-```
-
 ## software constants
 
 these are constants within the software that you will have to change if you wish to make any modifications to the protocol:  
@@ -30,114 +19,289 @@ as defined in `include/dht/util.hpp` and `include/dht/proto.h`:
 - max data size in bytes (`max_data_size`) (default: 65535) (CHANGE?)
 - `a` value from kademlia paper (`alpha`) (default: 3)
 
-## infrastructure
-
-every peer has two sockets open for messaging, a UDP and a TCP socket.   
-UDP messages are meant for messages described below, and the TCP socket should only serve to receive and send larger packets of data.  
-
-these sockets should run on different threads, as to not cause blocking.
-
 ## messages
 
 one message per client should be handled at any time. a client should not have more than one message actively being processed.  
 
-### message context
+### message skeleton
 
-are we requesting, responding or are we doing something else? these are represented as `u8`:
+- messages are encoded using messagepack but this document will describe messages in JSON as they are identical.  
+- messages missing any of these elements will be discarded  
+- messages larger than the maximum allowed size will be discarded
 
-- `0x00`: messages that request information (request)
-- `0x01`: messages that respond to requests for information (response)
-- `0x02`: message that acknowledges receiving data (ack)
-
-### message actions
-
-messages require an action to be associated with them. these are represented as `u8`:
-
-- `0x00`: check if recipient is still online (ping)
-- `0x01`: request the `K` closest peers to an ID (find_node)
-- `0x02`: find a value in the network hash table based on the key (find_value)
-- `0x03`: store a value in the recipient's local hash table (store)
-- `0x04`: acknowledge receiving data (ack)
-
-### message response codes
-
-messages must respond with a response code to determine success or failure. these are represented as `u8`:
-
-- `0x00`: success (ok)
-- `0x01`: generic internal error (bad_internal)
-
-## message formats
-
-the reply-back port is the TCP port.  
-the messaging port is the UDP port.  
-
-### UDP message format
-
-| `struct msg`                 |
-|------------------------------|
-| magic (`u8` x `magic_length`)          |
-| id (`u32_hash_width`-`u32`s)             |
-| msg id (`u32_hash_width`-`u32`s)         |
-| action (`u8` x 1)            |
-| context (`u8` x 1)           |
-| response (`u8` x 1)          |
-| messaging port (`u16` x 1)   |
-| reply-back port (`u16` x 1)  |
-| payload size (`u64` x 1)     |
-
-***NOTE:*** if payload size is non-zero, it is implied that the recipient will be receiving more data (exactly `payload size` bytes) over the TCP socket.
-
-***NOTE:*** if the requester sends a request while the requester has a pending operation, the responder will refuse the request.
-
-### TCP message format
-
-| `struct rp_msg`              |
-|------------------------------|
-| magic (`u8` x `magic_length`)          |
-| id (`u32_hash_width`-`u32`s)    |
-| msg id (`u32_hash_width`-`u32`s)|
-| messaging port (`u32` x 1)   |
-| reply-back port (`u32` x 1)  |
-| payload size (`u64` x 1)     |
-
-after receiving an `rp_msg`, the TCP socket should be ready to receive `payload size` bytes.  
-to acknowledge that the data was received, send a `msg` with the `context` set to `0x02` (ack).
-
-## message sequences
-
-***NOTE:*** message id's should be used for whole message sequences. however, these should be UNIQUE! do not reuse message ids. you have 2^`bit_hash_width` different IDs to use...use them!  
-
-***NOTE:*** any non data transfer related messages should have payload size set to 0.
-
-***NOTE:*** all messages after the first message must be *responses*
-
-### legend
 
 ```
-LEGEND:
-    ----> means requester
-    <---- means responder
+{
+        "s": <schema version>,
+        "m": <message type>,
+        "a": <action>,
+        "i": <serialized ID>,
+        "q": <message ID>,
+        "d": {
+                <action-specific data>
+        }
+}
 ```
 
-### ping
+#### schema version
+
+as of the writing of this document, schema version will always be `0x00` until changes are made to the protocol
+
+#### message type
+
+there are two types of messages:
+
+- queries (`0x00`)
+- responses (`0x01`)
+
+#### action
+
+there are four actions:
+
+- ping (`0x00`)
+- store (`0x01`)
+- find_node (`0x02`)
+- find_value (`0x03`)
+
+#### serialized ID
+
+the serialized ID will be a hex-string, for example:
+
+- `01234567abcdef`
+- `1b1b30aeb0df0ed0f0c0ba03548135`
+
+#### message ID
+
+message IDs are random 64-bit integer identifiers to associate RPCs with their respective sequences  
+responses must always use the message ID of their respective queries
+
+## actions
+
+the action-specific data and sequences for the actions are the following: 
+
+### ping (`0x00`)
+
+this message is meant for pinging nodes to see if they are online
+
+#### action-specific data
+
+there is no extra data to be sent from both parties
+
+#### sequence
+
+#### 1. sender sends initial query:
+```
+{
+        "s": 0,
+        "m": 0,
+        "a": 0,
+        "i": "0b00b1e5",
+        "q": 103581305802345,
+        "d": { }
+}
+```
+
+#### 2. recipient sends response:
+```
+{
+        "s": 0,
+        "m": 1,
+        "a": 0,
+        "i": "177ff13e",
+        "q": 103581305802345,
+        "d": { }
+}
+```
+
+### store (`0x01`)
+
+this message is meant for storing key-value pairs on a specific node's hash table
+
+#### action-specific data
+
+for sender,
+```
+"d": {
+        "k": <serialized key>,
+        "v": <packed binary data>
+}
+```
+
+for recipient,
+```
+"d": {
+        "ok": 1
+}
+```
+
+where the serialized key is identical to the serialized ID and the packed binary data is a msgpack bin array
+
+#### sequence
+
+#### 1. sender sends initial query
+```
+{
+        "s": 0,
+        "m": 0,
+        "a": 1,
+        "i": "0b00b1e5",
+        "q": 103581305802345,
+        "d": {
+                "k": "101e7bc5",
+                "v": a3 e5 1d 0f 9e ... 6e 77 3a 0e 9f
+        }
+}
+```
+
+#### 2. recipient sends response
+```
+{
+        "s": 0,
+        "m": 0,
+        "a": 1,
+        "i": "177ff13e",
+        "q": 103581305802345,
+        "d": {
+                "ok": 1
+        }
+}
+```
+
+### find_node (`0x02`)
+
+this message returns a list of `K` closest nodes to a given ID 
+
+#### action-specific data
+
+for sender,
+```
+"d": {
+        "t": <target ID>
+}
+```
+
+where the target ID is a serialized ID  
+
+for recipient, "buckets" are serialized into arrays where each element describes a peer, like so:
 
 ```
-UDP         TCP    Action
------>             requester sends ping msg
-<-----             responder replies with ping msg response
+"d": {
+        "b": [
+                {"a": <IP address>, "p": <UDP port>, "i": <ID> }, 
+                {"a": <IP address>, "p": <UDP port>, "i": <ID> },
+                {"a": <IP address>, "p": <UDP port>, "i": <ID> }
+        ]
+}
 ```
 
-### find_node
+where IP addresses are strings, ports are integers and IDs are serialized IDs
+
+if there are no nearby nodes, the bucket may be empty
+
+#### sequence
+
+#### 1. sender sends initial query
 
 ```
-UDP         TCP    Action
------>             requester sends find_node msg 
-<-----             responder replies with find_node msg ok response (no data)
-         ----->    requester sends rp_msg detailing payload size
-         ----->    requester sends serialized node to find (u32_hash_width u32s)
-<-----             responder replies with a msg detailing payload size (response)
------>             requester replies with details msg ok response (no data)
-         <-----    responder sends rp_msg detailing payload size and other information
-         <-----    responder sends actual payload (serialized bucket)
------>             requester replies with a msg acknowledging receival (action: ack, context: response)
+        "s": 0,
+        "m": 0,
+        "a": 2,
+        "i": "0b00b1e5",
+        "q": 103581305802345,
+        "d": {
+                "t": "19aebc67"
+        }
+```
+
+#### 2. recipient sends response
+
+```
+{
+        "s": 0,
+        "m": 1,
+        "a": 2,
+        "i": "177ff13e",
+        "q": 103581305802345,
+        "d": {
+                "b": [
+                        {"a": "24.30.210.11", "p": 16616, "i": "00e0fb37" }, 
+                        {"a": "1.1.51.103", "p": 10510, "i": "ab0de4c2" }
+                ]
+        }
+}
+```
+
+### find_value (`0x03`)
+
+this message is similar to `find_node`, it returns the `K` closest nodes to a given ID. however, if the recipient has the target ID in its hash table, it will instead return the stored value
+
+#### action-specific data
+
+for sender,
+
+```
+"d": {
+        "t": <target ID>
+}
+```
+
+where the target ID is a serialized ID
+
+for recipient,
+
+```
+"d": {
+        "v": <stored value>,
+        "b": <nearest nodes>
+}
+```
+
+where the stored value is either a msgpack bin array or nil depending on whether or not it was found in the recipient's hash table and the nearest nodes either being an array of nodes or nil depending on the same factors as the stored value  
+
+`find_value` **cannot** return **both** a stored value and a node array, such messages should be rejected
+
+#### sequence
+
+#### 1. sender sends initial query
+
+```
+        "s": 0,
+        "m": 0,
+        "a": 3,
+        "i": "0b00b1e5",
+        "q": 103581305802345,
+        "d": {
+                "t": "19aebc67"
+        }
+```
+
+#### 2a. recipient has target ID in hash table, sends response with value stored at key
+
+```
+        "s": 0,
+        "m": 1,
+        "a": 3,
+        "i": "177ff13e",
+        "q": 103581305802345,
+        "d": {
+                "v": 1e e5 6a 2e 90 ... a0 e4 b7 61 d8,
+                "b": nil
+        }
+```
+
+#### 2b. recipient does not have target ID in hash table, sends response with closest nodes to target ID
+
+```
+        "s": 0,
+        "m": 1,
+        "a": 3,
+        "i": "177ff13e",
+        "q": 103581305802345,
+        "d": {
+                "v": nil,
+                "b": [
+                        {"a": "24.30.210.11", "p": 16616, "i": "00e0fb37" }, 
+                        {"a": "1.1.51.103", "p": 10510, "i": "ab0de4c2" }       
+                ]
+        }
 ```
