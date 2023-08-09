@@ -19,6 +19,7 @@ cmake --build .
 
 - [boost](http://boost.org)
 - [gabime/spdlog](http://github.com/gabime/spdlog)
+- [msgpack/msgpack-c](http://github.com/msgpack/msgpack-c)
 
 ## notes for user
 
