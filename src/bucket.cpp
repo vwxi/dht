@@ -21,7 +21,7 @@ void bucket::update(peer req, bool nearby) {
         peer beg = *begin();
         spdlog::debug("checking if node {} ({}:{}) is alive", util::htos(beg.id), beg.addr, beg.port);
 
-        table.net.send(
+        table.net.send(true,
             beg, proto::type::query, proto::actions::ping, 
             table.id, util::msg_id(), msgpack::type::nil_t(),
             [this](peer p, std::string) {

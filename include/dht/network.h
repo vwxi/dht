@@ -43,16 +43,17 @@ public:
     q_callback q_nothing = [](peer, std::string) { };
     f_callback f_nothing = [](peer) { };
 
-    void await(peer, hash_t, q_callback, f_callback);
-    void satisfy(peer, hash_t, std::string);
+    void await(peer, u64, q_callback, f_callback);
+    void satisfy(peer, u64, std::string);
+    bool pending(peer, u64);
 
 private:
     struct item {
         peer req;
-        hash_t msg_id;
+        u64 msg_id;
         std::promise<std::string> promise;
         bool satisfied;
-        item(peer r, hash_t m, bool s) : req(r), msg_id(m), satisfied(s) { }
+        item(peer r, u64 m, bool s) : req(r), msg_id(m), satisfied(s) { }
     };
 
     void wait(std::list<item>::iterator, q_callback, f_callback);
@@ -74,7 +75,7 @@ public:
     void recv();
 
     template <typename T>
-    void send(peer p, int m, int a, hash_t i, u64 q, T d, msg_queue::q_callback ok, msg_queue::f_callback bad) {
+    void send(bool f, peer p, int m, int a, hash_t i, u64 q, T d, msg_queue::q_callback ok, msg_queue::f_callback bad) {
         // pack message
 
         std::stringstream ss;
@@ -96,7 +97,8 @@ public:
         socket.async_send_to(boost::asio::buffer(sb.data(), sb.size()), p.endpoint(), b_nothing);
 
         // await a response
-        queue.await(p, i, ok, bad);
+        if(f)
+            queue.await(p, q, ok, bad);
     }
 
     using b_callback = std::function<void(boost::system::error_code, std::size_t)>;

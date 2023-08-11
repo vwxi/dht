@@ -26,6 +26,7 @@ one message per client should be handled at any time. a client should not have m
 - messages are encoded using messagepack but this document will describe messages in JSON as they are identical.  
 - messages missing any of these elements will be discarded  
 - messages larger than the maximum allowed size will be discarded
+- sending a query before sending back a response will cause the query to be discarded
 
 
 ```
@@ -120,7 +121,7 @@ this message is meant for storing key-value pairs on a specific node's hash tabl
 for sender,
 ```
 "d": {
-        "k": <serialized key>,
+        "k": <key>,
         "v": <binary data>
 }
 ```
@@ -128,13 +129,12 @@ for sender,
 for recipient,
 ```
 "d": {
-        "ok": 1
+        "c": <checksum>,
+        "s": <status>
 }
 ```
 
-where the serialized key is identical to the serialized ID and the binary data is a string containing the value
-
-if the "ok" value is any value other than 1, assume an error occurred
+where the key is a plaintext string, the binary data is a string containing the value, the checksum is a 32-bit checksum (crc-32) of the stored value and the status is an integer detailing whether or not the store was successful (zero = ok, nonzero = error) 
 
 #### sequence
 
@@ -147,7 +147,7 @@ if the "ok" value is any value other than 1, assume an error occurred
         "i": "0b00b1e5",
         "q": 103581305802345,
         "d": {
-                "k": "101e7bc5",
+                "k": "boobies",
                 "v": a3 e5 1d 0f 9e ... 6e 77 3a 0e 9f
         }
 }
@@ -162,7 +162,8 @@ if the "ok" value is any value other than 1, assume an error occurred
         "i": "177ff13e",
         "q": 103581305802345,
         "d": {
-                "ok": 1
+                "c": 10010501359,
+                "s": 0
         }
 }
 ```

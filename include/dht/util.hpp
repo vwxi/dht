@@ -20,6 +20,7 @@
 #include <mutex>
 #include <cstdlib>
 #include <ctime>
+#include <cstdint>
 
 #include <boost/asio.hpp>
 #include <boost/uuid/detail/sha1.hpp>
@@ -33,10 +34,10 @@
 
 namespace tulip {
 
-typedef unsigned long long int u64; 
-typedef unsigned long int u32;
-typedef unsigned short u16;
-typedef unsigned char u8;
+typedef std::uint64_t u64; 
+typedef std::uint32_t u32;
+typedef std::uint16_t u16;
+typedef std::uint8_t u8;
 
 using boost::asio::ip::udp;
 using boost::asio::ip::tcp;
@@ -60,7 +61,7 @@ namespace dht {
 namespace proto {
 
 const int magic_length = 4; // magic length in bytes
-const int u32_hash_width = 5; // hash width in unsigned ints
+const int hash_width = 5; // hash width in unsigned ints
 const int bucket_size = 4;   // number of entries in k-buckets (SHOULD NOT BE OVER 20)
 const int bit_hash_width = 32; // hash width in bits
 const int missed_pings_allowed = 3; // number of missed pings allowed
@@ -74,7 +75,7 @@ const int alpha = 3; // alpha from kademlia paper
 
 typedef std::bitset<proto::bit_hash_width> hash_t;
 
-typedef u32 id_t[proto::u32_hash_width];
+typedef u32 id_t[proto::hash_width];
 
 namespace util { // utilities
 
@@ -172,9 +173,36 @@ static std::string to_bin(std::string hex) {
     for(auto i : hex)
         try {
             r += t.at(std::toupper(i));
-        } catch (std::exception&) { throw std::invalid_argument("to_bin: bad hex string"); }
+        } catch (std::exception&) { spdlog::info("kkkkkqeflp {}",i);throw std::invalid_argument("to_bin: bad hex string"); }
 
     return r;
+}
+
+// http://www.hackersdelight.org/hdcodetxt/crc.c.txt
+static unsigned int crc32b(unsigned char *message) {
+   int i, j;
+   unsigned int byte, crc, mask;
+
+   i = 0;
+   crc = 0xFFFFFFFF;
+   while (message[i] != 0) {
+      byte = message[i];            // Get next byte.
+      crc = crc ^ byte;
+      for (j = 7; j >= 0; j--) {    // Do eight times.
+         mask = -(crc & 1);
+         crc = (crc >> 1) ^ (0xEDB88320 & mask);
+      }
+      i = i + 1;
+   }
+   return ~crc;
+}
+
+static hash_t sha1(std::string s) {
+    boost::uuids::detail::sha1 sha1;
+    id_t h;
+    sha1.process_bytes(s.c_str(), s.size());
+    sha1.get_digest(h);
+    return util::htob(h);
 }
 
 }

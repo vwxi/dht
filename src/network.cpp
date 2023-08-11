@@ -9,7 +9,7 @@ namespace dht {
 
 /// message queue
 
-void msg_queue::await(peer p, hash_t msg_id, q_callback ok, f_callback bad) {
+void msg_queue::await(peer p, u64 msg_id, q_callback ok, f_callback bad) {
     LOCK(mutex);
 
     items.emplace_back(p, msg_id, false);
@@ -58,7 +58,7 @@ void msg_queue::wait(std::list<item>::iterator it, q_callback ok, f_callback bad
     }
 }
 
-void msg_queue::satisfy(peer p, hash_t msg_id, std::string data) {
+void msg_queue::satisfy(peer p, u64 msg_id, std::string data) {
     LOCK(mutex);
 
     auto it = std::find_if(items.begin(), items.end(),
@@ -69,6 +69,15 @@ void msg_queue::satisfy(peer p, hash_t msg_id, std::string data) {
 
     it->satisfied = true;
     it->promise.set_value(data);
+}
+
+bool msg_queue::pending(peer p, u64 msg_id) {
+    LOCK(mutex);
+
+    auto it = std::find_if(items.begin(), items.end(),
+        [&](const item& i) { return i.req == p && i.msg_id == msg_id && !i.satisfied; });
+
+    return it != items.end();
 }
 
 /// networking
@@ -134,14 +143,20 @@ void network::handle(std::string buf, udp::endpoint ep) {
 
     proto::message msg = obj.as<proto::message>();
 
-    peer p(ep.address().to_string(), ep.port(), hash_t(util::to_bin(msg.i)));
+    try {
+        peer p(ep.address().to_string(), ep.port(), hash_t(util::to_bin(msg.i)));
 
-    switch(msg.a) {
-    case proto::actions::ping: handle_ping(std::move(p), std::move(msg)); break;
-    case proto::actions::store: handle_store(std::move(p), std::move(msg)); break;
-    case proto::actions::find_node: handle_find_node(std::move(p), std::move(msg)); break;
-    case proto::actions::find_value: handle_find_value(std::move(p), std::move(msg)); break;
-    }
+        // if there's already a response pending, drop this one
+        if(msg.m == proto::type::query && queue.pending(p, msg.q))
+            return;
+
+        switch(msg.a) {
+        case proto::actions::ping: handle_ping(std::move(p), std::move(msg)); break;
+        case proto::actions::store: handle_store(std::move(p), std::move(msg)); break;
+        case proto::actions::find_node: handle_find_node(std::move(p), std::move(msg)); break;
+        case proto::actions::find_value: handle_find_value(std::move(p), std::move(msg)); break;
+        }
+    } catch (std::exception& e) { spdlog::error("handle exception: {}", e.what()); }
 }
 
 

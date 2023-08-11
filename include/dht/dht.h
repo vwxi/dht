@@ -39,6 +39,8 @@ private:
 
     network net;
     routing_table table;
+    
+    std::mutex ht_mutex;
     std::unordered_map<hash_t, std::string> ht;
 
     std::random_device rd;

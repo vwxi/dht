@@ -22,6 +22,11 @@ enum type {
     response = 1
 };
 
+enum status {
+    ok = 0,
+    bad = 1
+};
+
 struct find_query_data {
     std::string t;
     MSGPACK_DEFINE_MAP(t);
@@ -35,9 +40,10 @@ struct store_query_data {
     MSGPACK_DEFINE_MAP(k, v);
 };
 
-struct store_response_data {
-    int ok;
-    MSGPACK_DEFINE_MAP(ok);
+struct store_resp_data {
+    u32 c;
+    int s;
+    MSGPACK_DEFINE_MAP(c, s);
 };
 
 // find_node
