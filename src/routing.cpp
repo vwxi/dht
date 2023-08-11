@@ -83,7 +83,6 @@ void routing_table::split(tree* t, int i) {
 
 /// @brief update peer in routing table whether or not it exists within table
 /// @param req peer struct
-/// @note this is for inbound requests that are not time-sensitive
 void routing_table::update(peer req) {
     LOCK(mutex);
     TRAVERSE;
@@ -144,6 +143,7 @@ void routing_table::update(peer req) {
 /// @brief evict peer from routing table, repeated calls will do nothing
 /// @param req peer struct
 void routing_table::evict(peer req) {
+    LOCK(mutex);
     TRAVERSE;
 
     // does peer exist in table?
@@ -164,7 +164,7 @@ void routing_table::evict(peer req) {
 
 /// @brief update peer that was in node's pending list
 /// @param req peer struct
-/// @note this is used for outbound requests that are time-sensitive
+/// @note this is used for pings
 void routing_table::update_pending(peer req) {
     LOCK(mutex);
     TRAVERSE;
@@ -188,6 +188,7 @@ void routing_table::update_pending(peer req) {
 /// @param req peer struct
 /// @return bucket object
 bucket routing_table::find_bucket(peer req) {
+    LOCK(mutex);
     TRAVERSE;
 
     return ptr->data;
@@ -196,6 +197,7 @@ bucket routing_table::find_bucket(peer req) {
 /// @brief increment staleness by one
 /// @param req peer struct
 int routing_table::stale(peer req) {
+    LOCK(mutex);
     TRAVERSE;
 
     if(it != ptr->data.end())

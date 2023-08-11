@@ -12,7 +12,7 @@ mkdir build
 cd build
 cmake ..
 cmake --build .
-./dht [udp port] [tcp port]
+./dht [udp port]
 ```
 
 ## requirements
@@ -23,7 +23,6 @@ cmake --build .
 
 ## list of stuff to do
 
-- store
 - find_value
 - refresh
 - document everything

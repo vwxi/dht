@@ -15,21 +15,9 @@ struct peer {
     int staleness;
 
     peer() { }
-
     peer(hash_t id_) : id(id_) { }
-    
-    peer(std::string a, u16 p, hash_t id_) : 
-        addr(a), 
-        port(p), 
-        staleness(0),
-        id(id_) { }
-
-    peer(std::string a, u16 p) : 
-        addr(a), 
-        port(p), 
-        staleness(0),
-        id(0) { }
-
+    peer(std::string a, u16 p, hash_t id_) : addr(a), port(p), staleness(0), id(id_) { }
+    peer(std::string a, u16 p) : addr(a), port(p), staleness(0), id(0) { }
     udp::endpoint endpoint() const { return udp::endpoint{boost::asio::ip::address::from_string(addr), port}; }
     bool operator==(const peer& rhs) const { return !addr.compare(rhs.addr) && port == rhs.port; }
     hash_t distance(hash_t from) { return id ^ from; }
@@ -77,9 +65,6 @@ public:
     template <typename T>
     void send(bool f, peer p, int m, int a, hash_t i, u64 q, T d, msg_queue::q_callback ok, msg_queue::f_callback bad) {
         // pack message
-
-        std::stringstream ss;
-
         msgpack::zone z;
 
         proto::message msg;

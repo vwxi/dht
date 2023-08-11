@@ -10,8 +10,10 @@ int main(int argc, char** argv) {
         node n(16161);
     } else {
         node n(17171);
-        n.store(peer("127.0.0.1", 16161), "key", "hello",
-            [](peer) { spdlog::info("yeahhhh"); },
+        n.find_node(peer("127.0.0.1", 16161), hash_t(0xb00b1e5),
+            [](peer, bucket bkt) { 
+                for(auto b : bkt) spdlog::info("node {}:{} id {}", b.addr, b.port, util::htos(b.id)); 
+                },
             [](peer) { spdlog::info("nahhhhh"); });
     }
 

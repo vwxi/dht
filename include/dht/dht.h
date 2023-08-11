@@ -22,7 +22,7 @@ public:
     // async interfaces
     void ping(peer, basic_callback, basic_callback);
     void store(peer, std::string, std::string, basic_callback, basic_callback);
-    void find_node(peer, bucket_callback, basic_callback);
+    void find_node(peer, hash_t, bucket_callback, basic_callback);
     void find_value(peer, find_value_callback, basic_callback);
 
     void lookup(hash_t, bucket_callback);
@@ -39,7 +39,7 @@ private:
 
     network net;
     routing_table table;
-    
+
     std::mutex ht_mutex;
     std::unordered_map<hash_t, std::string> ht;
 

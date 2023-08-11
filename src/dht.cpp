@@ -66,11 +66,49 @@ void node::handle_store(peer p, proto::message msg) {
 
         if(d.s == proto::status::ok)
             net.queue.satisfy(p, msg.q, ss.str());
+
+        table.update(p);
     }
 }
 
 void node::handle_find_node(peer p, proto::message msg) {
-    /// @todo handle_find_node
+    if(msg.m == proto::type::query) {
+        proto::find_query_data d;
+        msg.d.convert(d);
+
+        hash_t target_id(util::to_bin(d.t));
+        bucket bkt = table.find_bucket(peer(target_id));
+
+        std::vector<proto::bucket_peer> b;
+        for(auto i : bkt)
+            b.push_back(proto::bucket_peer{i.addr, i.port, util::htos(i.id)});
+
+        net.send(false,
+            p, proto::type::response, proto::actions::find_node,
+            id, msg.q, proto::find_node_resp_data { .b = std::move(b) },
+            net.queue.q_nothing, net.queue.f_nothing);
+
+        table.update(p);
+    } else if(msg.m == proto::type::response) {
+        proto::find_node_resp_data d;
+        bucket bkt(table);
+        msgpack::object_handle oh;
+
+        msg.d.convert(d);
+
+        std::stringstream ss;
+
+        // hacky, repack
+        {
+            msgpack::zone z;
+            proto::find_node_resp_data d_;
+            msgpack::pack(ss, d);
+        }
+
+        net.queue.satisfy(p, msg.q, ss.str());
+        
+        table.update(p);
+    }
 }
 
 void node::handle_find_value(peer p, proto::message msg) {
@@ -103,7 +141,7 @@ void node::store(peer p, std::string key, std::string value, basic_callback ok, 
         [this, ok, bad, chksum](peer p_, std::string s) { 
             u32 csum;
             std::stringstream ss;
-            
+
             ss << s;
             ss >> csum;
 
@@ -115,6 +153,29 @@ void node::store(peer p, std::string key, std::string value, basic_callback ok, 
         },
         [this, bad](peer p_) { 
             bad(p_); 
+        });
+}
+
+void node::find_node(peer p, hash_t target_id, bucket_callback ok, basic_callback bad) {
+    net.send(true,
+        p, proto::type::query, proto::actions::find_node,
+        id, util::msg_id(), proto::find_query_data { .t = util::htos(target_id) },
+        [this, ok, bad](peer p_, std::string s) {
+            msgpack::object_handle oh;
+            msgpack::unpack(oh, s.data(), s.size());
+            msgpack::object obj = oh.get();
+            proto::find_node_resp_data b;
+            obj.convert(b);
+
+            bucket bkt(table);
+
+            for(auto i : b.b)
+                bkt.push_back(peer(i.a, i.p, hash_t(util::to_bin(i.i))));
+
+            ok(p_, std::move(bkt));
+        },
+        [this, bad](peer p_) {
+            bad(p_);
         });
 }
 
