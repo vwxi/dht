@@ -13,12 +13,11 @@ class node;
 
 class routing_table {
 public:
-    routing_table(hash_t, node&);
+    routing_table(hash_t, network&);
     ~routing_table();
 
     void traverse(hash_t, tree**, int&);
     void split(tree*, int);
-    bool exists(peer);
     void update(peer);
     void evict(peer);
     void update_pending(peer);
@@ -27,7 +26,7 @@ public:
     
     hash_t id;
     
-    node& node_;
+    network& net;
 
     std::mutex mutex;
 
@@ -38,13 +37,13 @@ private:
 struct tree {
     struct tree* left;
     struct tree* right;
-    std::shared_ptr<bucket> data;
+    bucket data;
     bool leaf;
 
-    std::shared_ptr<std::list<peer>> cache;
+    std::list<peer> cache;
     std::mutex cache_mutex;
 
-    tree();
+    tree(routing_table&);
     ~tree();
 };
 

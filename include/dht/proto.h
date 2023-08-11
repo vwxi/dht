@@ -8,66 +8,68 @@ namespace dht {
 
 namespace proto { // protocol
 
-const u16 Mport = 16666; // messaging port (UDP)
-const u16 Rport = 16667; // reply port (TCP)
+const int schema_version = 0;
 
 enum actions {
     ping = 0,
-    find_node = 1,
-    find_value = 2,
-    store = 3,
-    ack = 4
+    store = 1,
+    find_node = 2,
+    find_value = 3
 };
 
-enum context {
-    request = 0,
+enum type {
+    query = 0,
     response = 1
 };
 
-enum responses {
-    ok = 0,
-    bad_internal = 1
+struct find_query_data {
+    std::string t;
+    MSGPACK_DEFINE_MAP(t);
 };
 
-struct {
-    u8 magic[magic_length];
-} const consts = {
-    .magic = {0xb0, 0x0b, 0x1e, 0x55}
+// store
+
+struct store_query_data {
+    std::string k;
+    std::string v;
+    MSGPACK_DEFINE_MAP(k, v);
 };
 
-struct msg {
-    u8 magic[magic_length];
-
-    id_t id;
-    id_t msg_id;
-
-    u8 action;
-    u8 reply;
-    u8 response;
-
-    u16 msg_port;
-    u16 reply_port;
-
-    u64 sz;
-} const ping_request = {
-    .action = proto::actions::ping,
-    .reply = 0,
-    .response = proto::responses::ok,
-    .sz = 0
+struct store_response_data {
+    int ok;
+    MSGPACK_DEFINE_MAP(ok);
 };
 
-struct rp_msg {
-    u8 magic[magic_length];
+// find_node
 
-    id_t id;
-    id_t msg_id;
-    
-    u8 ack;
+struct bucket_peer {
+    std::string a;
+    int p;
+    std::string i;
+    MSGPACK_DEFINE_MAP(a, p, i);
+};
 
-    u16 msg_port;
-    u16 reply_port;
-    
-    u64 sz;
+struct find_node_resp_data {
+    std::vector<bucket_peer> b;
+    MSGPACK_DEFINE_MAP(b);
+};
+
+// find_value
+
+struct find_value_resp_data {
+    boost::optional<std::string> v;
+    boost::optional<std::vector<bucket_peer>> b;
+    MSGPACK_DEFINE_MAP(v, b);
+};
+
+struct message {
+    int s;
+    int m;
+    int a;
+    std::string i;
+    u64 q;
+    msgpack::object d;
+    MSGPACK_DEFINE_MAP(s, m, a, i, q, d);
 };
 
 }

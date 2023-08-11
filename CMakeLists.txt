@@ -5,21 +5,19 @@ project(
 	VERSION 1.0
 	LANGUAGES CXX)
 
+set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g -fsanitize=address")
+set(CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_LINKER_FLAGS_DEBUG} -g -fsanitize=address")
+
 set(Boost_USE_STATIC_LIBS OFF)
 set(Boost_USE_MULTITHREADED ON)
 set(Boost_USE_STATIC_RUNTIME OFF)
-find_package(Boost 1.50 REQUIRED COMPONENTS system serialization)
+find_package(Boost 1.50 REQUIRED COMPONENTS system)
 
 if(NOT TARGET Boost::system)
 	add_library(Boost::system IMPORTED INTERFACE)
 	set_property(TARGET Boost::system PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${Boost_INCLUDE_DIR})
 	set_property(TARGET Boost::system PROPERTY INTERFACE_LINK_LIBRARIES ${Boost_LIBARIES})
-endif()
-
-if(NOT TARGET Boost::serialization)
-	add_library(Boost::serialization IMPORTED INTERFACE)
-	set_property(TARGET Boost::serialization PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${Boost_INCLUDE_DIR})
-	set_property(TARGET Boost::serialization PROPERTY INTERFACE_LINK_LIBRARIES ${Boost_LIBARIES})
 endif()
 
 find_package(msgpack-cxx REQUIRED)
@@ -54,8 +52,6 @@ add_executable(
 	src/dht.cpp
 )
 
-#add_compile_options(-fsanitize=address,undefined)
-
 target_include_directories(
 	${PROJECT_NAME} PUBLIC
 	"${PROJECT_BINARY_DIR}"
@@ -63,4 +59,4 @@ target_include_directories(
 	"${PROJECT_SOURCE_DIR}/extern"
 )
 
-target_link_libraries(dht PUBLIC Boost::system Boost::serialization spdlog::spdlog pthread msgpack-cxx)
+target_link_libraries(dht PUBLIC Boost::system spdlog::spdlog pthread msgpack-cxx -g -fsanitize=address)

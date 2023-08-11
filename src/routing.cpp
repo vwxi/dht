@@ -10,33 +10,27 @@
     int i = 0; \
     traverse(req.id, &ptr, i); \
     assert(ptr); \
-    auto it = std::find_if(ptr->data->begin(), ptr->data->end(), \
+    auto it = std::find_if(ptr->data.begin(), ptr->data.end(), \
         [&](peer p) { return p.id == req.id; }); 
 
 namespace tulip {
 namespace dht {
 
 /// @brief initialize a tree
-tree::tree() {
-    left = right = nullptr;
-    data = std::make_shared<bucket>();
-    cache = std::make_shared<std::list<peer>>();
-    leaf = true;
-}
+tree::tree(routing_table& rt) :
+    data(rt), leaf(true), left(nullptr), right(nullptr) { }
 
 tree::~tree() {
     delete left;
     delete right;
-    data.reset();
-    cache.reset();
     cache_mutex.unlock();
 }
 
 /// @brief initialize a routing table
 /// @param id_ root id
 /// @param node__ node reference
-routing_table::routing_table(hash_t id_, node& node__) : id(id_), node_(node__) {
-    root = new tree;
+routing_table::routing_table(hash_t id_, network& net_) : id(id_), net(net_) {
+    root = new tree(*this);
 };
 
 routing_table::~routing_table() {
@@ -68,81 +62,78 @@ void routing_table::traverse(hash_t id, tree** ptr, int& i) {
 void routing_table::split(tree* t, int i) {
     if(!t) return;
 
-    t->left = new tree;
+    t->left = new tree(*this);
     if(!t->left) return;
 
-    t->right = new tree;
+    t->right = new tree(*this);
     if(!t->right) return;
 
     t->leaf = false;
 
-    for(auto& it : *(t->data)) {
+    for(auto& it : t->data) {
         if(it.id[proto::bit_hash_width - i]) {
-            t->right->data->push_back(it);
+            t->right->data.push_back(it);
         } else { 
-            t->left->data->push_back(it);
+            t->left->data.push_back(it);
         }
     }
 
-    t->data->clear();
-}
-
-/// @brief check if peer exists in routing table
-/// @param req peer struct
-/// @return true if so, false if not
-bool routing_table::exists(peer req) {
-    TRAVERSE;
-    return it != ptr->data->end();
+    t->data.clear();
 }
 
 /// @brief update peer in routing table whether or not it exists within table
 /// @param req peer struct
 /// @note this is for inbound requests that are not time-sensitive
 void routing_table::update(peer req) {
+    LOCK(mutex);
     TRAVERSE;
+
+    // mismatched node - diff ip same id
+    if(it != ptr->data.end() && !(req == *it))
+        return;
 
     hash_t prefix(((~hash_t(0) << (proto::bit_hash_width - i)) & ~hash_t(0)));
         
-    if(ptr->data->size() < ptr->data->max_size) {
+    if(ptr->data.size() < ptr->data.max_size) {
         spdlog::debug("bucket isn't full, update node {}", util::htos(req.id));
         // bucket is not full, update node
-        ptr->data->update(*this, req, true);
+        ptr->data.update(req, true);
     } else {
         if((req.id & prefix) == (id & prefix)) {
-            if(it == ptr->data->end()) {
+            if(it == ptr->data.end()) {
                 spdlog::debug("bucket is within prefix, split");
                 // bucket is full and within our own prefix, split
                 split(ptr, i);
             } else {
                 spdlog::debug("bucket is nearby and full");
                 // bucket is full but nearby, update node
-                ptr->data->update(*this, req, true);
+                ptr->data.update(req, true);
             }
         } else {
             spdlog::debug("bucket is far and full");
-            if(exists(req)) {
+            if(it != ptr->data.end()) {
                 // node is known to us already, ping normally
-                ptr->data->update(*this, req, false);
+                ptr->data.update(req, false);
                 spdlog::debug("node {} exists in table, updating normally", util::htos(req.id));
             } else {
                 // node is unknown
                 LOCK(ptr->cache_mutex);
-                auto cit = std::find_if(ptr->cache->begin(), ptr->cache->end(),
+                auto cit = std::find_if(ptr->cache.begin(), ptr->cache.end(),
                     [&](peer p) { return p.id == req.id; });
                 
-                if(cit == ptr->cache->end()) {
+                if(cit == ptr->cache.end()) {
                     // is the cache full? kick out oldest node and add this one
-                    if(ptr->cache->size() > proto::repl_cache_size) {
+                    if(ptr->cache.size() > proto::repl_cache_size) {
                         spdlog::debug("replacement cache is full, removing oldest candidate");
-                        ptr->cache->pop_front();
+                        ptr->cache.pop_front();
                     }
                     
                     // node is unknown and doesn't exist in cache, add
-                    ptr->cache->push_back(req);
+                    ptr->cache.push_back(req);
                     spdlog::debug("node {} is unknown, adding to replacement cache", util::htos(req.id));
                 } else {
                     // node is unknown and exists in cache, move to back
-                    ptr->cache->splice(ptr->cache->end(), *(ptr->cache), cit);
+                    ptr->cache.splice(ptr->cache.end(), ptr->cache, cit);
                     spdlog::debug("node {} is unknown, moving to end of replacement cache", util::htos(req.id));
                 }
             }
@@ -156,17 +147,17 @@ void routing_table::evict(peer req) {
     TRAVERSE;
 
     // does peer exist in table?
-    if(it != ptr->data->end()) {
+    if(it != ptr->data.end()) {
         // erase from bucket
-        ptr->data->erase(it);
+        ptr->data.erase(it);
 
         // if cache has peer waiting, add most recently noticed node to bucket
-        if(ptr->cache->size() > 0) {
-            auto cit = ptr->cache->end();
+        if(ptr->cache.size() > 0) {
+            auto cit = ptr->cache.end();
             cit--;
             spdlog::debug("there is peer ({}) in the cache waiting, add it to the bucket", util::htos(cit->id));
-            ptr->data->push_back(*cit);
-            ptr->cache->erase(cit);
+            ptr->data.push_back(*cit);
+            ptr->cache.erase(cit);
         }
     }
 }
@@ -175,18 +166,19 @@ void routing_table::evict(peer req) {
 /// @param req peer struct
 /// @note this is used for outbound requests that are time-sensitive
 void routing_table::update_pending(peer req) {
+    LOCK(mutex);
     TRAVERSE;
 
     // does peer exist in table?
-    if(it != ptr->data->end()) {
+    if(it != ptr->data.end()) {
         // if peer isn't too stale, decrement staleness and move to end of bucket
         if(req.staleness++ < proto::missed_pings_allowed) {
             req.staleness--;
-            ptr->data->splice(ptr->data->end(), *(ptr->data), it);
+            ptr->data.splice(ptr->data.end(), ptr->data, it);
             spdlog::debug("pending node {} updated", util::htos(req.id));
         } else {
             // otherwise, erase peer from bucket
-            ptr->data->erase(it);
+            ptr->data.erase(it);
             spdlog::debug("erasing pending node {}", util::htos(req.id));
         }
     }
@@ -198,7 +190,7 @@ void routing_table::update_pending(peer req) {
 bucket routing_table::find_bucket(peer req) {
     TRAVERSE;
 
-    return *(ptr->data);
+    return ptr->data;
 }
 
 /// @brief increment staleness by one
@@ -206,7 +198,7 @@ bucket routing_table::find_bucket(peer req) {
 int routing_table::stale(peer req) {
     TRAVERSE;
 
-    if(it != ptr->data->end())
+    if(it != ptr->data.end())
         return it->staleness++;
     return -1;
 }

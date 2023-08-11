@@ -8,193 +8,115 @@
 namespace tulip {
 namespace dht {
 
-#define OBTAIN_FUT_MSG \
-    std::string v = fut.get(); \
-    proto::msg m; \
-    std::memcpy(reinterpret_cast<char*>(&m), v.c_str(), v.size());
-
 struct peer {
-    friend boost::serialization::access;
-
     hash_t id;
     std::string addr;
     u16 port;
-    u16 reply_port;
-
     int staleness;
 
     peer() { }
 
     peer(hash_t id_) : id(id_) { }
     
-    peer(std::string a, u16 p, u16 rp, hash_t id_) : 
+    peer(std::string a, u16 p, hash_t id_) : 
         addr(a), 
         port(p), 
-        reply_port(rp), 
         staleness(0),
         id(id_) { }
 
-    peer(std::string a, u16 p, u16 rp) : 
+    peer(std::string a, u16 p) : 
         addr(a), 
         port(p), 
-        reply_port(rp), 
         staleness(0),
         id(0) { }
 
-    udp::endpoint to_udp_endpoint() const {
-        return udp::endpoint{boost::asio::ip::address::from_string(addr), port};
-    }
-
-    udp::endpoint rp_to_udp_endpoint() const {
-        return udp::endpoint{boost::asio::ip::address::from_string(addr), reply_port};
-    }
-
-    tcp::endpoint to_tcp_endpoint() const {
-        return tcp::endpoint{boost::asio::ip::address::from_string(addr), port};
-    }
-
-    tcp::endpoint rp_to_tcp_endpoint() const {
-        return tcp::endpoint{boost::asio::ip::address::from_string(addr), reply_port};
-    }
-
-    template <class Archive>
-    void serialize(Archive& ar, const u32 version) {
-        ar & addr;
-        ar & port;
-        ar & reply_port;
-        ar & id;
-    }
-
-    bool operator==(const peer& rhs) const {
-        return !addr.compare(rhs.addr) && 
-            port == rhs.port && 
-            reply_port == rhs.reply_port;
-    }
-
+    udp::endpoint endpoint() const { return udp::endpoint{boost::asio::ip::address::from_string(addr), port}; }
+    bool operator==(const peer& rhs) const { return !addr.compare(rhs.addr) && port == rhs.port; }
     hash_t distance(hash_t from) { return id ^ from; }
 };
 
-struct pending_item {
-    peer req;
-    hash_t msg_id;
-    proto::actions action;
-    std::promise<std::string> promise;
-    bool satisfied;
-    bool rp;
-    pending_item(peer, hash_t, proto::actions, bool);
-};
-
-struct pending_result {
-    peer req;
-    hash_t msg_id;
-    proto::actions action;
-    pending_result(const pending_item& i) :
-        req(i.req), msg_id(i.msg_id), action(i.action) { }
-};
-
-class rp_node_peer;
-class rp_node;
-class node;
-
-using pend_it = std::list<pending_item>::iterator;
-// server error callback
-using se_callback = std::function<void(peer)>;
-// peer callback
-using p_callback = std::function<void(std::future<std::string>, pending_result)>;
-// boost asio callback
-using ba_callback = std::function<void(boost::system::error_code, std::size_t)>;
-
-using rpn_ptr = std::shared_ptr<rp_node_peer>;
-
-/// @brief a TCP connection
-class rp_node_peer :
-    public std::enable_shared_from_this<rp_node_peer> {
+class msg_queue {
 public:
-    rp_node_peer(rp_node&, tcp::socket);
-    rp_node_peer(rp_node&, tcp::endpoint);
-    
-    void handle();
-    void write(proto::rp_msg, std::string, peer, se_callback, se_callback);
+    using q_callback = std::function<void(peer, std::string)>;
+    using f_callback = std::function<void(peer)>;
+
+    q_callback q_nothing = [](peer, std::string) { };
+    f_callback f_nothing = [](peer) { };
+
+    void await(peer, hash_t, q_callback, f_callback);
+    void satisfy(peer, hash_t, std::string);
 
 private:
-    tcp::socket socket;
-    tcp::endpoint endpoint;
-    proto::rp_msg m_in;
-    proto::rp_msg m_out;
-    std::string buf;
-    rp_node& rp_node_;
+    struct item {
+        peer req;
+        hash_t msg_id;
+        std::promise<std::string> promise;
+        bool satisfied;
+        item(peer r, hash_t m, bool s) : req(r), msg_id(m), satisfied(s) { }
+    };
+
+    void wait(std::list<item>::iterator, q_callback, f_callback);
+
+    std::mutex mutex;
+    std::list<item> items;
 };
 
-/// @brief a TCP server/client
-class rp_node {
+class node;
+
+/// @brief interface for networking
+class network {
 public:
-    rp_node(node&, u16);
-    ~rp_node();
+    using m_callback = std::function<void(peer, proto::message)>;
 
-    void loop();
-    void start();
+    network(u16, m_callback, m_callback, m_callback, m_callback);
+    ~network();
+    void run();
+    void recv();
 
-    void send(peer, hash_t, std::string, se_callback, se_callback);
+    template <typename T>
+    void send(peer p, int m, int a, hash_t i, u64 q, T d, msg_queue::q_callback ok, msg_queue::f_callback bad) {
+        // pack message
 
-    node& node_;
-    u16 port;
+        std::stringstream ss;
+
+        msgpack::zone z;
+
+        proto::message msg;
+        msg.s = proto::schema_version; // s: schema
+        msg.m = m; // m: message type
+        msg.a = a; // a: action
+        msg.i = util::htos(i); // i: serialized ID
+        msg.q = q; // q: message ID
+        msg.d = msgpack::object(d, z); // d: action-specific data
+        
+        msgpack::sbuffer sb;
+        msgpack::pack(sb, msg);
+
+        // send
+        socket.async_send_to(boost::asio::buffer(sb.data(), sb.size()), p.endpoint(), b_nothing);
+
+        // await a response
+        queue.await(p, i, ok, bad);
+    }
+
+    using b_callback = std::function<void(boost::system::error_code, std::size_t)>;
+    b_callback b_nothing = [](boost::system::error_code, std::size_t) { };
+
+    msg_queue queue;
+    
+private:
+    void handle(std::string, udp::endpoint);
+
+    m_callback handle_ping;
+    m_callback handle_store;
+    m_callback handle_find_node;
+    m_callback handle_find_value;
+
     boost::asio::io_context ioc;
     std::thread ioc_thread;
-    tcp::acceptor acceptor;
-};
-
-/// @brief a class containing both the TCP and UDP servers
-class node {
-public:
-    node(u16, u16);
-    ~node();
-
-    void start();
-
-    hash_t send(bool, proto::context, proto::responses, peer, proto::actions, u64, p_callback, p_callback);
-    hash_t send(bool, proto::context, proto::responses, peer, proto::actions, u64, hash_t, p_callback, p_callback);
-
-    p_callback p_do_nothing = [](std::future<std::string>, dht::pending_result) { };
-    se_callback se_do_nothing = [](peer) { };
-
-    template <proto::actions a>
-    void okay(std::future<std::string>, pending_result);
-
-    template <proto::actions a>
-    void bad(std::future<std::string>, pending_result);
-
-    void await(peer, hash_t, proto::actions, bool, p_callback, p_callback);
-    void await_ack(peer, hash_t);
-    
-    hash_t id;
     u16 port;
-    routing_table table;
-    std::mutex pending_mutex;
-    std::list<pending_item> pending;
-    boost::asio::io_context ioc;
-    std::thread ioc_thread;
-
-protected:
-    ba_callback ba_do_nothing = [&](boost::system::error_code ec, std::size_t sz) { };
-
-    void loop();
-    
-    void wait(pend_it, p_callback, p_callback);
-
-    template <proto::actions a>
-    void reply(peer); // reply to a request
-
-    hash_t send(bool, proto::context, peer, proto::actions, p_callback, p_callback);
-
-    rp_node rp_node_;
     udp::socket socket;
-    udp::endpoint client;
-    std::mutex m_in_mutex;
-    std::mutex m_out_mutex;
-    proto::msg m_in;
-    proto::msg m_out;
-    std::random_device rd;
-    std::default_random_engine reng;
+    udp::endpoint endpoint;
 };
 
 }

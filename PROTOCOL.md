@@ -7,8 +7,6 @@ this document will detail the information send between nodes on the network.
 these are constants within the software that you will have to change if you wish to make any modifications to the protocol:  
 as defined in `include/dht/util.hpp` and `include/dht/proto.h`:
 
-- magic length in bytes (`magic_length`) (default: 4)
-- magic bytes (`consts.magic`) (default: `b0 0b 1e 55`)
 - hash width in u32s (`u32_hash_width`) (default: 5)
 - number of peer entries allowed in one bucket (`K`) (default: 4) (CHANGE!)
 - hash width in bits (`bit_hash_width`) (default: 160)
@@ -97,7 +95,7 @@ there is no extra data to be sent from both parties
         "a": 0,
         "i": "0b00b1e5",
         "q": 103581305802345,
-        "d": { }
+        "d": nil
 }
 ```
 
@@ -109,7 +107,7 @@ there is no extra data to be sent from both parties
         "a": 0,
         "i": "177ff13e",
         "q": 103581305802345,
-        "d": { }
+        "d": nil
 }
 ```
 
@@ -123,7 +121,7 @@ for sender,
 ```
 "d": {
         "k": <serialized key>,
-        "v": <packed binary data>
+        "v": <binary data>
 }
 ```
 
@@ -134,7 +132,9 @@ for recipient,
 }
 ```
 
-where the serialized key is identical to the serialized ID and the packed binary data is a msgpack bin array
+where the serialized key is identical to the serialized ID and the binary data is a string containing the value
+
+if the "ok" value is any value other than 1, assume an error occurred
 
 #### sequence
 
@@ -256,7 +256,7 @@ for recipient,
 }
 ```
 
-where the stored value is either a msgpack bin array or nil depending on whether or not it was found in the recipient's hash table and the nearest nodes either being an array of nodes or nil depending on the same factors as the stored value  
+where the stored value is either a string or nil depending on whether or not it was found in the recipient's hash table and the nearest nodes either being an array of nodes or nil depending on the same factors as the stored value  
 
 `find_value` **cannot** return **both** a stored value and a node array, such messages should be rejected
 

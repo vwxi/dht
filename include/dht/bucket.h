@@ -8,29 +8,22 @@ namespace dht {
 
 class routing_table;
 class peer;
-class node;
+class network;
 
 class bucket : 
     public std::list<peer>,
     public std::enable_shared_from_this<std::list<peer>> {
 public:
-    friend boost::serialization::access;
-    
-    bucket();
+    bucket(routing_table&);
     ~bucket();
-
-    template <class Archive>
-    void serialize(Archive& ar, const u32 version) {
-        ar & max_size;
-        ar & boost::serialization::base_object<std::list<peer>>(*this);
-    }
     
-    void update(routing_table&, peer, bool);
+    void update(peer, bool);
 
     bool closer(const bucket&, hash_t);
 
     u64 last_seen;
     std::size_t max_size;
+    routing_table& table;
 };
 
 }

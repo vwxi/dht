@@ -4,35 +4,48 @@
 #include "util.hpp"
 #include "proto.h"
 #include "bucket.h"
-
 #include "routing.h"
 #include "network.h"
-#include "spdlog/spdlog.h"
 
 namespace tulip {
+namespace dht {
 
-using c_callback = std::function<void(dht::peer)>; // empty client callback
-using bkt_callback = std::function<void(dht::peer, dht::bucket)>; // client callback returns bucket & peer
+// callback types
+using basic_callback = std::function<void(peer)>;
+using bucket_callback = std::function<void(peer, bucket)>;
+using find_value_callback = std::function<void(peer, bool, std::string, bucket)>;
 
-/// @brief accessible interface
-class node : dht::node {
+class node {
 public:
-    node();
-    node(u16, u16);
+    node(u16);
 
-    void do_nothing(dht::peer);
+    // async interfaces
+    void ping(peer, basic_callback, basic_callback);
+    void store(peer, std::string, std::string, basic_callback, basic_callback);
+    void find_node(peer, bucket_callback, basic_callback);
+    void find_value(peer, find_value_callback, basic_callback);
 
-    void ping(dht::peer, c_callback, c_callback);
-    void find_node(dht::peer, dht::hash_t, bkt_callback, c_callback);
+    void lookup(hash_t, bucket_callback);
+    
+private:
+    basic_callback basic_nothing = [](peer) { };
+    
+    void handle_ping(peer, proto::message);
+    void handle_store(peer, proto::message);
+    void handle_find_node(peer, proto::message);
+    void handle_find_value(peer, proto::message);
 
-    dht::bucket lookup(std::mutex&, std::mutex&, std::mutex&, std::list<dht::peer>&, dht::bucket&, dht::hash_t);
-    dht::bucket lookup(dht::hash_t);
+    hash_t id;
 
-    dht::hash_t own_id();
+    network net;
+    routing_table table;
+    std::unordered_map<hash_t, std::string> ht;
 
-    std::unordered_map<dht::hash_t, std::string> ht;
+    std::random_device rd;
+    std::default_random_engine reng;
 };
 
+}
 }
 
 #endif

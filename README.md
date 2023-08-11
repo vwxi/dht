@@ -21,13 +21,10 @@ cmake --build .
 - [gabime/spdlog](http://github.com/gabime/spdlog)
 - [msgpack/msgpack-c](http://github.com/msgpack/msgpack-c)
 
-## notes for user
-
-- all functions labeled `@private` shouldn't be used in production
-
 ## list of stuff to do
 
 - store
 - find_value
 - refresh
-- testing interface
+- document everything
+- tests

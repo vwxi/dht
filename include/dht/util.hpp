@@ -3,6 +3,7 @@
 
 #include <iostream>
 #include <iomanip>
+#include <stdexcept>
 #include <utility>
 #include <list>
 #include <set>
@@ -17,17 +18,12 @@
 #include <future>
 #include <thread>
 #include <mutex>
+#include <cstdlib>
+#include <ctime>
 
 #include <boost/asio.hpp>
 #include <boost/uuid/detail/sha1.hpp>
-#include <boost/archive/binary_oarchive.hpp>
-#include <boost/archive/binary_iarchive.hpp>
-#include <boost/serialization/list.hpp>
-#include <boost/serialization/string.hpp>
-#include <boost/serialization/bitset.hpp>
-#include <boost/serialization/split_member.hpp>
-#include <boost/serialization/base_object.hpp>
-#include <boost/serialization/version.hpp>
+#include <boost/optional.hpp>
 
 #include <msgpack.hpp>
 
@@ -151,10 +147,34 @@ static void msg_id(std::default_random_engine& reng, id_t& h) {
     std::generate(std::begin(h), std::end(h), [&]() { return uid(reng); });
 }
 
+static u64 msg_id() {
+    u64 r = rand();
+    r = (r << 30) | rand();
+    r = (r << 30) | rand();
+    return r;
+}
+
 static hash_t gen_id(std::default_random_engine& reng) {
     id_t id;
     msg_id(reng, id);
     return htob(id);
+}
+
+static std::string to_bin(std::string hex) {
+    const std::unordered_map<char, std::string> t = {
+        { '0', "0000" }, { '1', "0001" }, { '2', "0010" }, { '3', "0011" }, 
+        { '4', "0100" }, { '5', "0101" }, { '6', "0110" }, { '7', "0111" }, 
+        { '8', "1000" }, { '9', "1001" }, { 'A', "1010" }, { 'B', "1011" }, 
+        { 'C', "1100" }, { 'D', "1101" }, { 'E', "1110" }, { 'F', "1111" }
+    };
+
+    std::string r;
+    for(auto i : hex)
+        try {
+            r += t.at(std::toupper(i));
+        } catch (std::exception&) { throw std::invalid_argument("to_bin: bad hex string"); }
+
+    return r;
 }
 
 }
