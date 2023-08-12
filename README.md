@@ -3,7 +3,8 @@
 ## what?
 
 a generic dht solution, to be used in larger projects involving peer-to-peer networking.  
-modeled after kademlia DHT (https://pdos.csail.mit.edu/~petar/papers/maymounkov-kademlia-lncs.pdf)
+modeled after kademlia DHT (https://pdos.csail.mit.edu/~petar/papers/maymounkov-kademlia-lncs.pdf)  
+this implementation doesn't have solutions for real world problems such as NAT and sybil attacks
 
 ## build instructions
 
@@ -12,7 +13,6 @@ mkdir build
 cd build
 cmake ..
 cmake --build .
-./dht [udp port]
 ```
 
 ## requirements
@@ -23,7 +23,6 @@ cmake --build .
 
 ## list of stuff to do
 
-- find_value
 - refresh
 - document everything
 - tests

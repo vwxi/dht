@@ -112,7 +112,54 @@ void node::handle_find_node(peer p, proto::message msg) {
 }
 
 void node::handle_find_value(peer p, proto::message msg) {
-    /// @todo handle_find_value
+    if(msg.m == proto::type::query) {
+        proto::find_query_data d;
+        msg.d.convert(d);
+
+        hash_t target_id(util::to_bin(d.t));
+
+        {
+            LOCK(ht_mutex);
+            decltype(ht)::iterator it;
+            if((it = ht.find(target_id)) != ht.end()) {
+                // key exists in hash table
+                net.send(false,
+                    p, proto::type::response, proto::actions::find_value,
+                    id, msg.q, proto::find_value_resp_data { .v = it->second, .b = boost::none },
+                    net.queue.q_nothing, net.queue.f_nothing);
+            } else {
+                // key does not exist in hash table
+                bucket bkt = table.find_bucket(peer(target_id));
+
+                std::vector<proto::bucket_peer> b;
+                for(auto i : bkt)
+                    b.push_back(proto::bucket_peer{i.addr, i.port, util::htos(i.id)});
+
+                net.send(false,
+                    p, proto::type::response, proto::actions::find_value,
+                    id, msg.q, proto::find_value_resp_data { .v = boost::none, .b = std::move(b) },
+                    net.queue.q_nothing, net.queue.f_nothing);
+            }
+        }
+
+        table.update(p);
+    } else if(msg.m == proto::type::response) {
+        proto::find_value_resp_data d;
+        msg.d.convert(d);
+
+        std::stringstream ss;
+
+        // hacky, repack
+        {
+            msgpack::zone z;
+            proto::find_node_resp_data d_;
+            msgpack::pack(ss, d);
+        }
+
+        net.queue.satisfy(p, msg.q, ss.str());
+
+        table.update(p);
+    }
 }
 
 /// async actions
@@ -173,6 +220,37 @@ void node::find_node(peer p, hash_t target_id, bucket_callback ok, basic_callbac
                 bkt.push_back(peer(i.a, i.p, hash_t(util::to_bin(i.i))));
 
             ok(p_, std::move(bkt));
+        },
+        [this, bad](peer p_) {
+            bad(p_);
+        });
+}
+
+void node::find_value(peer p, hash_t target_id, find_value_callback ok, basic_callback bad) {
+    net.send(true,
+        p, proto::type::query, proto::actions::find_value,
+        id, util::msg_id(), proto::find_query_data { .t = util::htos(target_id) },
+        [this, ok, bad](peer p_, std::string s) {
+            msgpack::object_handle oh;
+            msgpack::unpack(oh, s.data(), s.size());
+            msgpack::object obj = oh.get();
+            proto::find_value_resp_data d;
+            obj.convert(d);
+
+            if((d.v == boost::none) != (d.b == boost::none)) {
+                if(d.v != boost::none) {
+                    ok(p_, d.v.value());
+                } else if(d.b != boost::none) {
+                    bucket bkt(table);
+
+                    for(auto i : d.b.value())
+                        bkt.push_back(peer(i.a, i.p, hash_t(util::to_bin(i.i))));
+
+                    ok(p_, std::move(bkt));
+                }
+            } else {
+                bad(p_);
+            }
         },
         [this, bad](peer p_) {
             bad(p_);

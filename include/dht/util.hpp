@@ -25,6 +25,7 @@
 #include <boost/asio.hpp>
 #include <boost/uuid/detail/sha1.hpp>
 #include <boost/optional.hpp>
+#include <boost/variant.hpp>
 
 #include <msgpack.hpp>
 
