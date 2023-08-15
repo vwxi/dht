@@ -14,7 +14,7 @@ void msg_queue::await(peer p, u64 msg_id, q_callback ok, f_callback bad) {
 
     items.emplace_back(p, msg_id, false);
     auto pit = items.end();
-    
+
     std::thread(&msg_queue::wait, this, --pit, ok, bad).detach();
 }
 
@@ -64,10 +64,12 @@ void msg_queue::satisfy(peer p, u64 msg_id, std::string data) {
     auto it = std::find_if(items.begin(), items.end(),
         [&](const item& i) { return i.req == p && i.msg_id == msg_id && !i.satisfied; });
 
-    if(it == items.end())
+    if(it == items.end()) {
         return;
+    }
 
     it->satisfied = true;
+    it->req = p;
     it->promise.set_value(data);
 }
 

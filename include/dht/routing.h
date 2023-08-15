@@ -11,10 +11,12 @@ struct tree;
 class peer;
 class node;
 
-class routing_table {
+class routing_table : public std::enable_shared_from_this<routing_table> {
 public:
     routing_table(hash_t, network&);
     ~routing_table();
+
+    void init();
 
     void traverse(hash_t, tree**, int&);
     void split(tree*, int);
@@ -31,6 +33,7 @@ public:
     std::mutex mutex;
 
 private:
+    std::shared_ptr<routing_table> strong_ref;
     tree* root;
 };
 

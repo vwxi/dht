@@ -23,6 +23,7 @@ cmake --build .
 
 ## list of stuff to do
 
+- join
 - refresh
 - document everything
 - tests

@@ -11,10 +11,17 @@ node::node(u16 port) :
         std::bind(&node::handle_store, this, _1, _2),
         std::bind(&node::handle_find_node, this, _1, _2),
         std::bind(&node::handle_find_value, this, _1, _2)),
-    table(id, net),
     reng(rd()) {
     std::srand(std::time(NULL));
-    id = table.id = util::gen_id(reng);
+
+    id = util::gen_id(reng);
+
+    table = std::make_shared<routing_table>(id, net);
+    table_ref = table;
+    table->init();
+
+    spdlog::debug("running DHT node on port {} (id: {})", port, util::htos(id));
+    
     net.run();
 }
 
@@ -27,7 +34,7 @@ void node::handle_ping(peer p, proto::message msg) {
             id, msg.q, msgpack::type::nil_t(),
             net.queue.q_nothing, net.queue.f_nothing);
 
-        table.update(p);
+        table->update(p);
     } else if(msg.m == proto::type::response) {
         net.queue.satisfy(p, msg.q, std::string{});
     }
@@ -41,8 +48,6 @@ void node::handle_store(peer p, proto::message msg) {
         hash_t k(util::sha1(d.k));
         u32 chksum = util::crc32b((u8*)d.v.data());
 
-        spdlog::debug("store key {} with val {}", util::htos(k), d.v);
-        
         int s = proto::status::ok;
 
         try {
@@ -55,7 +60,7 @@ void node::handle_store(peer p, proto::message msg) {
             id, msg.q, proto::store_resp_data { .c = chksum, .s = s },
             net.queue.q_nothing, net.queue.f_nothing);
 
-        table.update(p);
+        table->update(p);
     } else if(msg.m == proto::type::response) {
         proto::store_resp_data d;
         msg.d.convert(d);
@@ -67,7 +72,7 @@ void node::handle_store(peer p, proto::message msg) {
         if(d.s == proto::status::ok)
             net.queue.satisfy(p, msg.q, ss.str());
 
-        table.update(p);
+        table->update(p);
     }
 }
 
@@ -77,7 +82,7 @@ void node::handle_find_node(peer p, proto::message msg) {
         msg.d.convert(d);
 
         hash_t target_id(util::to_bin(d.t));
-        bucket bkt = table.find_bucket(peer(target_id));
+        bucket bkt = table->find_bucket(peer(target_id));
 
         std::vector<proto::bucket_peer> b;
         for(auto i : bkt)
@@ -88,10 +93,10 @@ void node::handle_find_node(peer p, proto::message msg) {
             id, msg.q, proto::find_node_resp_data { .b = std::move(b) },
             net.queue.q_nothing, net.queue.f_nothing);
 
-        table.update(p);
+        table->update(p);
     } else if(msg.m == proto::type::response) {
         proto::find_node_resp_data d;
-        bucket bkt(table);
+        bucket bkt(*table);
         msgpack::object_handle oh;
 
         msg.d.convert(d);
@@ -107,7 +112,7 @@ void node::handle_find_node(peer p, proto::message msg) {
 
         net.queue.satisfy(p, msg.q, ss.str());
         
-        table.update(p);
+        table->update(p);
     }
 }
 
@@ -129,7 +134,7 @@ void node::handle_find_value(peer p, proto::message msg) {
                     net.queue.q_nothing, net.queue.f_nothing);
             } else {
                 // key does not exist in hash table
-                bucket bkt = table.find_bucket(peer(target_id));
+                bucket bkt = table->find_bucket(peer(target_id));
 
                 std::vector<proto::bucket_peer> b;
                 for(auto i : bkt)
@@ -142,7 +147,7 @@ void node::handle_find_value(peer p, proto::message msg) {
             }
         }
 
-        table.update(p);
+        table->update(p);
     } else if(msg.m == proto::type::response) {
         proto::find_value_resp_data d;
         msg.d.convert(d);
@@ -158,7 +163,7 @@ void node::handle_find_value(peer p, proto::message msg) {
 
         net.queue.satisfy(p, msg.q, ss.str());
 
-        table.update(p);
+        table->update(p);
     }
 }
 
@@ -168,13 +173,12 @@ void node::ping(peer p, basic_callback ok, basic_callback bad) {
     net.send(true,
         p, proto::type::query, proto::actions::ping,
         id, util::msg_id(), msgpack::type::nil_t(),
-        [this, ok](peer p_, std::string) { 
-            table.update_pending(p_);
+        [this, ok](peer p_, std::string s) { 
+            table->update(p_);
             ok(p_); 
         },
         [this, bad](peer p_) {
-            if(table.stale(p_) > proto::missed_pings_allowed)
-                table.evict(p_);
+            table->stale(p_);
             bad(p_); 
         });
 }
@@ -214,7 +218,7 @@ void node::find_node(peer p, hash_t target_id, bucket_callback ok, basic_callbac
             proto::find_node_resp_data b;
             obj.convert(b);
 
-            bucket bkt(table);
+            bucket bkt(*table);
 
             for(auto i : b.b)
                 bkt.push_back(peer(i.a, i.p, hash_t(util::to_bin(i.i))));
@@ -241,7 +245,7 @@ void node::find_value(peer p, hash_t target_id, find_value_callback ok, basic_ca
                 if(d.v != boost::none) {
                     ok(p_, d.v.value());
                 } else if(d.b != boost::none) {
-                    bucket bkt(table);
+                    bucket bkt(*table);
 
                     for(auto i : d.b.value())
                         bkt.push_back(peer(i.a, i.p, hash_t(util::to_bin(i.i))));
@@ -255,6 +259,128 @@ void node::find_value(peer p, hash_t target_id, find_value_callback ok, basic_ca
         [this, bad](peer p_) {
             bad(p_);
         });
+}
+
+void node::find_value(peer p, std::string key, find_value_callback ok, basic_callback bad) {
+    find_value(p, util::sha1(key), ok, bad);
+}
+
+fv_value node::lookup(bool fv, hash_t target_id) {
+    std::list<peer> visited;
+    bucket closest = table->find_bucket(peer(target_id));
+
+    while(true) {
+        if(closest.empty()) {
+            spdlog::debug("we don't have any closest peers, ending");
+            return closest;
+        }
+
+        spdlog::info("new round");
+
+        std::list<std::future<fv_value>> tasks;
+        std::list<fv_value> responses;
+        bucket candidate(*table);
+
+        // start queries
+        for(peer p : closest) {
+            visited.push_back(p);
+
+            spdlog::info("querying {}:{}", p.addr, p.port);
+
+            tasks.push_back(std::async(
+                std::launch::async,
+                [&](peer p_) {
+                    std::promise<fv_value> prom;
+                    std::future<fv_value> fut = prom.get_future();
+
+                    if(fv) {
+                        find_value(p_, target_id,
+                            [&, pr = std::make_shared<std::promise<fv_value>>(std::move(prom))](peer p__, fv_value v) {
+                                spdlog::debug("find_value msg back from {}:{} id {}", p__.addr, p__.port, util::htos(p__.id));
+                                pr->set_value(std::move(v));
+                            }, net.queue.f_nothing);
+                    } else {
+                        find_node(p_, target_id,
+                            [&, pr = std::make_shared<std::promise<fv_value>>(std::move(prom))](peer p__, bucket v) {
+                                spdlog::debug("find_node msg back from {}:{} id {}", p__.addr, p__.port, util::htos(p__.id));
+                                pr->set_value(std::move(v));
+                            }, net.queue.f_nothing);
+                    }
+
+                    switch(fut.wait_for(seconds(proto::net_timeout))) {
+                    case std::future_status::ready:
+                        return fut.get();
+                    default:
+                        spdlog::debug("{}:{} id {} didn't respond", p_.addr, p_.port, util::htos(p_.id));
+                        return fv_value(boost::blank{});
+                    }
+                },
+                p
+            ));
+        }
+
+        // wait for responses
+        for(auto&& t : tasks)
+            responses.push_back(t.get());
+
+        // remove empty responses
+        responses.remove_if([&](fv_value v) { return v.type() == typeid(boost::blank); });
+
+        // end if we don't have any responses
+        if(responses.empty()) {
+            spdlog::debug("none of the peers responded, ending");
+            break;
+        }
+
+        // check if an actual value came through
+        for(auto r : responses) {
+            // we got a value, return immediately
+            if(r.type() == typeid(std::string) && fv)
+                return r;
+        }
+
+        spdlog::info("responses sz: {}", responses.size());
+        
+        // from here on it's exclusively buckets, look for next candidate bucket
+        auto it = std::min_element(responses.begin(), responses.end(),
+            [&](fv_value a, fv_value b) { return boost::get<bucket>(a).closer(boost::get<bucket>(b), target_id); });
+
+        bucket& g = boost::get<bucket>(*it);
+        std::copy(g.begin(), g.end(), std::back_inserter(candidate));
+
+        // remove already visited peers and ourselves
+        candidate.remove_if([&](peer a) {
+            return std::count(visited.begin(), visited.end(), a) != 0 || a.id == id;
+        });
+
+        // end if we don't have a candidate anymore
+        if(candidate.empty()) {
+            spdlog::debug("candidate bucket has no more peers, ending");
+            break;
+        }
+
+        // if we got a closer candidate, make candidate the closest and iterate 
+        if(candidate.closer(closest, target_id)) {
+            closest.clear();
+            std::copy(candidate.cbegin(), candidate.cend(), std::back_inserter(closest));
+        } else {
+            spdlog::debug("candidate is no closer than current closest bucket, ending");
+            break;
+        }
+    }
+
+    return closest;
+}
+
+bucket node::iter_find_node(hash_t target_id) {
+    fv_value v = lookup(false, target_id);
+    bucket b(*table);
+    
+    bucket& g = boost::get<bucket>(v);
+    for(auto i : g)
+        b.push_back(i);
+
+    return b;
 }
 
 }

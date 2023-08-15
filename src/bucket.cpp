@@ -7,8 +7,6 @@ namespace dht {
 
 bucket::bucket(routing_table& rt) : max_size(proto::bucket_size), last_seen(0), table(rt) { };
 
-bucket::~bucket() { }
-
 /// @brief update a peer in a bucket
 /// @param table routing table
 /// @param req peer struct

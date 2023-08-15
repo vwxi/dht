@@ -6,7 +6,7 @@ project(
 	LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 14)
-set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g -fsanitize=address")
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g -O0 -fsanitize=address")
 set(CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_LINKER_FLAGS_DEBUG} -g -fsanitize=address")
 
 set(Boost_USE_STATIC_LIBS OFF)
@@ -59,4 +59,4 @@ target_include_directories(
 	"${PROJECT_SOURCE_DIR}/extern"
 )
 
-target_link_libraries(dht PUBLIC Boost::system spdlog::spdlog pthread msgpack-cxx -g -fsanitize=address)
+target_link_libraries(dht PUBLIC Boost::system spdlog::spdlog pthread msgpack-cxx)

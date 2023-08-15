@@ -10,12 +10,9 @@ class routing_table;
 class peer;
 class network;
 
-class bucket : 
-    public std::list<peer>,
-    public std::enable_shared_from_this<std::list<peer>> {
+class bucket : public std::list<peer> {
 public:
     bucket(routing_table&);
-    ~bucket();
     
     void update(peer, bool);
 

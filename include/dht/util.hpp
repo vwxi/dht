@@ -21,6 +21,7 @@
 #include <cstdlib>
 #include <ctime>
 #include <cstdint>
+#include <cassert>
 
 #include <boost/asio.hpp>
 #include <boost/uuid/detail/sha1.hpp>
@@ -67,7 +68,7 @@ const int bucket_size = 4;   // number of entries in k-buckets (SHOULD NOT BE OV
 const int bit_hash_width = 32; // hash width in bits
 const int missed_pings_allowed = 3; // number of missed pings allowed
 const int missed_messages_allowed = 3; // number of missed messages allowed
-const int net_timeout = 10; // number of seconds until timeout
+const int net_timeout = 3; // number of seconds until timeout
 const int repl_cache_size = 3; // number of peers allowed in bucket replacement cache at one time
 const u64 max_data_size = 65535; // max data size in bytes
 const int alpha = 3; // alpha from kademlia paper
@@ -174,7 +175,7 @@ static std::string to_bin(std::string hex) {
     for(auto i : hex)
         try {
             r += t.at(std::toupper(i));
-        } catch (std::exception&) { spdlog::info("kkkkkqeflp {}",i);throw std::invalid_argument("to_bin: bad hex string"); }
+        } catch (std::exception&) { throw std::invalid_argument("to_bin: bad hex string"); }
 
     return r;
 }

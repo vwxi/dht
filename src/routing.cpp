@@ -6,12 +6,13 @@
 /// @brief internal macro that traverses a tree based on the peer's id and also
 /// tries to find peer within current bucket after traversal
 #define TRAVERSE \
+    LOCK(mutex); \
     tree* ptr = root; \
     int i = 0; \
     traverse(req.id, &ptr, i); \
-    assert(ptr); \
+    assert(ptr != nullptr); \
     auto it = std::find_if(ptr->data.begin(), ptr->data.end(), \
-        [&](peer p) { return p.id == req.id; }); 
+        [&](const peer& p) { return p.id == req.id; }); 
 
 namespace tulip {
 namespace dht {
@@ -21,8 +22,8 @@ tree::tree(routing_table& rt) :
     data(rt), leaf(true), left(nullptr), right(nullptr) { }
 
 tree::~tree() {
-    delete left;
-    delete right;
+    delete left; left = nullptr;
+    delete right; right = nullptr;
     cache_mutex.unlock();
 }
 
@@ -34,7 +35,11 @@ routing_table::routing_table(hash_t id_, network& net_) : id(id_), net(net_) {
 };
 
 routing_table::~routing_table() {
-    delete root;
+    delete root; root = nullptr;
+}
+
+void routing_table::init() {
+    strong_ref = shared_from_this();
 }
 
 /// @brief take a ptr to the ptr of some root and traverse based on bits of id
@@ -84,7 +89,6 @@ void routing_table::split(tree* t, int i) {
 /// @brief update peer in routing table whether or not it exists within table
 /// @param req peer struct
 void routing_table::update(peer req) {
-    LOCK(mutex);
     TRAVERSE;
 
     // mismatched node - diff ip same id
@@ -143,7 +147,6 @@ void routing_table::update(peer req) {
 /// @brief evict peer from routing table, repeated calls will do nothing
 /// @param req peer struct
 void routing_table::evict(peer req) {
-    LOCK(mutex);
     TRAVERSE;
 
     // does peer exist in table?
@@ -164,9 +167,8 @@ void routing_table::evict(peer req) {
 
 /// @brief update peer that was in node's pending list
 /// @param req peer struct
-/// @note this is used for pings
+/// @note this is used for pings to update bucket peers
 void routing_table::update_pending(peer req) {
-    LOCK(mutex);
     TRAVERSE;
 
     // does peer exist in table?
@@ -188,7 +190,6 @@ void routing_table::update_pending(peer req) {
 /// @param req peer struct
 /// @return bucket object
 bucket routing_table::find_bucket(peer req) {
-    LOCK(mutex);
     TRAVERSE;
 
     return ptr->data;
@@ -197,7 +198,6 @@ bucket routing_table::find_bucket(peer req) {
 /// @brief increment staleness by one
 /// @param req peer struct
 int routing_table::stale(peer req) {
-    LOCK(mutex);
     TRAVERSE;
 
     if(it != ptr->data.end())
