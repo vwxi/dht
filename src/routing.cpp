@@ -106,6 +106,7 @@ void routing_table::update(peer req) {
             if(it == ptr->data.end()) {
                 spdlog::debug("bucket is within prefix, split");
                 // bucket is full and within our own prefix, split
+                /// @todo relaxed splitting, see https://stackoverflow.com/questions/32129978/highly-unbalanced-kademlia-routing-table/32187456#32187456
                 split(ptr, i);
             } else {
                 spdlog::debug("bucket is nearby and full");

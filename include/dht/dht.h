@@ -6,7 +6,6 @@
 #include "bucket.h"
 #include "routing.h"
 #include "network.h"
-#include <boost/variant/static_visitor.hpp>
 
 namespace tulip {
 namespace dht {
@@ -30,15 +29,15 @@ public:
     void find_value(peer, hash_t, find_value_callback, basic_callback);
     void find_value(peer, std::string, find_value_callback, basic_callback);
 
-    fv_value lookup(bool, hash_t);
-
     void iter_store(std::string, std::string);
     bucket iter_find_node(hash_t);
-    boost::optional<std::string> iter_find_value(std::string);
+    fv_value iter_find_value(std::string);
     
 private:
     basic_callback basic_nothing = [](peer) { };
-    
+
+    fv_value lookup(bool, std::string, hash_t);
+
     void handle_ping(peer, proto::message);
     void handle_store(peer, proto::message);
     void handle_find_node(peer, proto::message);
