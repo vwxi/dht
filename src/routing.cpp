@@ -43,15 +43,15 @@ void routing_table::init() {
 }
 
 /// @brief take a ptr to the ptr of some root and traverse based on bits of id
-/// @param id id to guide traversal
+/// @param t id to guide traversal
 /// @param ptr ptr to move around
 /// @param i number of branches traversed
-void routing_table::traverse(hash_t id, tree** ptr, int& i) {
+void routing_table::traverse(hash_t t, tree** ptr, int& i) {
     if(!ptr) return;
     if(!*ptr) return;
 
     while((*ptr)->leaf == false) {
-        if(id[proto::bit_hash_width - i++]) {
+        if(t[proto::bit_hash_width - i++]) {
             if(!(*ptr)->right) { *ptr = NULL; return; }
             *ptr = (*ptr)->right;
         } else {
@@ -87,7 +87,6 @@ void routing_table::split(tree* t, int i) {
 }
 
 /// @brief update peer in routing table whether or not it exists within table
-/// @param req peer struct
 void routing_table::update(peer req) {
     TRAVERSE;
 
@@ -146,7 +145,6 @@ void routing_table::update(peer req) {
 }
 
 /// @brief evict peer from routing table, repeated calls will do nothing
-/// @param req peer struct
 void routing_table::evict(peer req) {
     TRAVERSE;
 
@@ -167,7 +165,6 @@ void routing_table::evict(peer req) {
 }
 
 /// @brief update peer that was in node's pending list
-/// @param req peer struct
 /// @note this is used for pings to update bucket peers
 void routing_table::update_pending(peer req) {
     TRAVERSE;
@@ -188,8 +185,6 @@ void routing_table::update_pending(peer req) {
 }
 
 /// @brief find bucket based on peer id
-/// @param req peer struct
-/// @return bucket object
 bucket routing_table::find_bucket(peer req) {
     TRAVERSE;
 
@@ -197,7 +192,6 @@ bucket routing_table::find_bucket(peer req) {
 }
 
 /// @brief increment staleness by one
-/// @param req peer struct
 int routing_table::stale(peer req) {
     TRAVERSE;
 

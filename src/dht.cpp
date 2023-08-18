@@ -321,6 +321,10 @@ fv_value node::lookup(bool fv, std::string fv_key, hash_t target_id) {
         if(responses.empty())
             break;
 
+        std::list<fut_t> sub;
+        std::copy_if(responses.begin(), responses.end(), std::back_inserter(sub),
+            [&](const fut_t& f) { return std::get<1>(f).type() != typeid(std::string); });
+
         // check if an actual value came through
         for(auto r : responses) {
             // we got a value, return immediately
@@ -332,10 +336,6 @@ fv_value node::lookup(bool fv, std::string fv_key, hash_t target_id) {
                 // closest node seen which did not return the value. (xlattice/kademlia)
 
                 std::string r_ = boost::get<std::string>(v);
-
-                std::list<fut_t> sub;
-                std::copy_if(responses.begin(), responses.end(), std::back_inserter(sub),
-                    [&](const fut_t& f) { return std::get<1>(f).type() != typeid(std::string); });
 
                 std::list<fut_t>::iterator i = std::min_element(sub.begin(), sub.end(),
                     [&](fut_t a, fut_t b) { 
@@ -350,9 +350,12 @@ fv_value node::lookup(bool fv, std::string fv_key, hash_t target_id) {
                 return v;
             }
         }
+
+        if(sub.empty())
+            break;
         
         // from here on it's exclusively buckets, look for next candidate bucket
-        auto it = std::min_element(responses.begin(), responses.end(),
+        auto it = std::min_element(sub.begin(), sub.end(),
             [&](fut_t a, fut_t b) { return boost::get<bucket>(std::get<1>(a)).closer(boost::get<bucket>(std::get<1>(b)), target_id); });
 
         bucket& g = boost::get<bucket>(std::get<1>(*it));
@@ -377,6 +380,7 @@ fv_value node::lookup(bool fv, std::string fv_key, hash_t target_id) {
     return closest;
 }
 
+/// @todo store should include timestamp
 void node::iter_store(std::string key, std::string value) {
     bucket b = iter_find_node(util::sha1(key));
 

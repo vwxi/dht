@@ -25,5 +25,6 @@ cmake --build .
 
 - join
 - refresh
+- republish
 - document everything
 - tests
