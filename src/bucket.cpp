@@ -5,7 +5,7 @@
 namespace tulip {
 namespace dht {
 
-bucket::bucket(routing_table& rt) : max_size(proto::bucket_size), last_seen(0), table(rt) { };
+bucket::bucket(std::shared_ptr<routing_table> rt) : max_size(proto::bucket_size), last_seen(0), table(rt) { };
 
 /// @brief update a peer in a bucket
 /// @param table routing table
@@ -19,17 +19,17 @@ void bucket::update(peer req, bool nearby) {
         peer beg = *begin();
         spdlog::debug("checking if node {} ({}:{}) is alive", util::htos(beg.id), beg.addr, beg.port);
 
-        table.net.send(true,
+        table->net.send(true,
             beg, proto::type::query, proto::actions::ping, 
-            table.id, util::msg_id(), msgpack::type::nil_t(),
+            table->id, util::msg_id(), msgpack::type::nil_t(),
             [this](peer p, std::string) {
                 spdlog::debug("responded, updating");
-                table.update_pending(p);
+                table->update_pending(p);
             },
             [this](peer p) {
                 int s;
-                if((s = table.stale(p)) > proto::missed_pings_allowed) {
-                    table.evict(p);
+                if((s = table->stale(p)) > proto::missed_pings_allowed) {
+                    table->evict(p);
                     spdlog::debug("did not respond, evicting {}", util::htos(p.id));
                 } else if(s != -1) {
                     spdlog::debug("did not respond. staleness: {}", s);
@@ -53,7 +53,7 @@ void bucket::update(peer req, bool nearby) {
     }
 
 end:
-    last_seen = duration_cast<seconds>(system_clock::now().time_since_epoch()).count();
+    last_seen = TIME_NOW();
 }
 
 // is bucket closer to t than b

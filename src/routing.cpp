@@ -1,77 +1,80 @@
 #include "routing.h"
 #include "bucket.h"
 #include "network.h"
+#include "util.hpp"
 
 /// @private
 /// @brief internal macro that traverses a tree based on the peer's id and also
 /// tries to find peer within current bucket after traversal
 #define TRAVERSE \
-    LOCK(mutex); \
-    tree* ptr = root; \
+    tree* ptr = NULL; \
+    bucket::iterator it; \
     int i = 0; \
-    traverse(req.id, &ptr, i); \
-    assert(ptr != nullptr); \
-    auto it = std::find_if(ptr->data.begin(), ptr->data.end(), \
-        [&](const peer& p) { return p.id == req.id; }); 
+    { \
+        R_LOCK(mutex); \
+        ptr = root; \
+        traverse(false, req.id, &ptr, i); \
+        assert(ptr != nullptr); \
+        it = std::find_if(ptr->data.begin(), ptr->data.end(), \
+            [&](const peer& p) { return p.id == req.id; }); \
+    }
 
 namespace tulip {
 namespace dht {
 
 /// @brief initialize a tree
-tree::tree(routing_table& rt) :
+tree::tree(std::shared_ptr<routing_table> rt) :
     data(rt), leaf(true), left(nullptr), right(nullptr) { }
 
 tree::~tree() {
     delete left; left = nullptr;
     delete right; right = nullptr;
-    cache_mutex.unlock();
 }
 
-/// @brief initialize a routing table
-/// @param id_ root id
-/// @param node__ node reference
-routing_table::routing_table(hash_t id_, network& net_) : id(id_), net(net_) {
-    root = new tree(*this);
-};
-
-routing_table::~routing_table() {
-    delete root; root = nullptr;
-}
+routing_table::routing_table(hash_t id_, network& net_) : id(id_), net(net_) { };
+routing_table::~routing_table() { delete root; root = nullptr; }
 
 void routing_table::init() {
     strong_ref = shared_from_this();
+
+    W_LOCK(mutex);
+
+    root = new tree(shared_from_this());
+    root->prefix.prefix = id & (hash_t(1) << proto::bit_hash_width);
+    root->prefix.cutoff = proto::bit_hash_width;
 }
 
 /// @brief take a ptr to the ptr of some root and traverse based on bits of id
-/// @param t id to guide traversal
-/// @param ptr ptr to move around
-/// @param i number of branches traversed
-void routing_table::traverse(hash_t t, tree** ptr, int& i) {
+void routing_table::traverse(bool p, hash_t t, tree** ptr, int& i) {
     if(!ptr) return;
     if(!*ptr) return;
 
-    while((*ptr)->leaf == false) {
+    while((*(*ptr)).leaf == false) {
         if(t[proto::bit_hash_width - i++]) {
-            if(!(*ptr)->right) { *ptr = NULL; return; }
+            if(!(*(*ptr)).right) { *ptr = NULL; return; }
+            else if(p && (*ptr)->right->leaf) return;
             *ptr = (*ptr)->right;
         } else {
             if(!(*ptr)->left) { *ptr = NULL; return; }
+            else if(p && (*ptr)->left->leaf) return;
             *ptr = (*ptr)->left;
         }
     }
 }
 
 /// @brief split a tree ptr into two subtrees, categorize contained nodes into new subtrees
-/// @param t tree ptr to split
-/// @param i bit index to determine categorization
 void routing_table::split(tree* t, int i) {
     if(!t) return;
 
-    t->left = new tree(*this);
+    t->left = new tree(shared_from_this());
     if(!t->left) return;
+    t->left->prefix.prefix = t->prefix.prefix;
+    t->left->prefix.cutoff = i + 1;
 
-    t->right = new tree(*this);
+    t->right = new tree(shared_from_this());
     if(!t->right) return;
+    t->right->prefix.prefix = t->prefix.prefix | (hash_t(1) << (proto::bit_hash_width - i));
+    t->right->prefix.cutoff = i + 1;
 
     t->leaf = false;
 
@@ -94,8 +97,10 @@ void routing_table::update(peer req) {
     if(it != ptr->data.end() && !(req == *it))
         return;
 
-    hash_t prefix(((~hash_t(0) << (proto::bit_hash_width - i)) & ~hash_t(0)));
-        
+    W_LOCK(mutex);
+
+    hash_t prefix(~hash_t(0) << (proto::bit_hash_width - i));
+    
     if(ptr->data.size() < ptr->data.max_size) {
         spdlog::debug("bucket isn't full, update node {}", util::htos(req.id));
         // bucket is not full, update node
@@ -119,8 +124,9 @@ void routing_table::update(peer req) {
                 ptr->data.update(req, false);
                 spdlog::debug("node {} exists in table, updating normally", util::htos(req.id));
             } else {
-                // node is unknown
                 LOCK(ptr->cache_mutex);
+                
+                // node is unknown
                 auto cit = std::find_if(ptr->cache.begin(), ptr->cache.end(),
                     [&](peer p) { return p.id == req.id; });
                 
@@ -169,6 +175,8 @@ void routing_table::evict(peer req) {
 void routing_table::update_pending(peer req) {
     TRAVERSE;
 
+    W_LOCK(mutex);
+    
     // does peer exist in table?
     if(it != ptr->data.end()) {
         // if peer isn't too stale, decrement staleness and move to end of bucket
@@ -195,9 +203,34 @@ bucket routing_table::find_bucket(peer req) {
 int routing_table::stale(peer req) {
     TRAVERSE;
 
+    W_LOCK(mutex);
+
     if(it != ptr->data.end())
         return it->staleness++;
     return -1;
+}
+
+void routing_table::_dfs(std::function<void(tree*)> fn, tree* ptr) {
+    if(ptr == nullptr) return;
+
+    R_LOCK(mutex);
+
+    if(ptr->leaf && ptr->data.empty()) return;
+
+    auto time_since = TIME_NOW() - ptr->data.last_seen;
+
+    if(ptr->leaf && time_since > proto::refresh_time) {
+        fn(ptr);
+        return;
+    }
+
+    if(ptr->left) _dfs(fn, ptr->left);
+    if(ptr->right) _dfs(fn, ptr->right);
+}
+
+void routing_table::dfs(std::function<void(tree*)> fn) {
+    tree* ptr = root;
+    _dfs(fn, ptr);
 }
 
 }

@@ -21,8 +21,19 @@ node::node(u16 port) :
     table->init();
 
     spdlog::debug("running DHT node on port {} (id: {})", port, util::htos(id));
-    
+
     net.run();
+    
+    refresh_thread = std::thread([&, this]() {
+        while(true) {
+            std::this_thread::sleep_for(seconds(proto::refresh_interval));
+            refresh_tree();
+        }
+    });
+}
+
+node::~node() {
+    refresh_thread.join();
 }
 
 /// handlers
@@ -96,7 +107,7 @@ void node::handle_find_node(peer p, proto::message msg) {
         table->update(p);
     } else if(msg.m == proto::type::response) {
         proto::find_node_resp_data d;
-        bucket bkt(*table);
+        bucket bkt(table);
         msgpack::object_handle oh;
 
         msg.d.convert(d);
@@ -218,7 +229,7 @@ void node::find_node(peer p, hash_t target_id, bucket_callback ok, basic_callbac
             proto::find_node_resp_data b;
             obj.convert(b);
 
-            bucket bkt(*table);
+            bucket bkt(table);
 
             for(auto i : b.b)
                 bkt.push_back(peer(i.a, i.p, hash_t(util::to_bin(i.i))));
@@ -245,7 +256,7 @@ void node::find_value(peer p, hash_t target_id, find_value_callback ok, basic_ca
                 if(d.v != boost::none) {
                     ok(p_, d.v.value());
                 } else if(d.b != boost::none) {
-                    bucket bkt(*table);
+                    bucket bkt(table);
 
                     for(auto i : d.b.value())
                         bkt.push_back(peer(i.a, i.p, hash_t(util::to_bin(i.i))));
@@ -265,54 +276,50 @@ void node::find_value(peer p, std::string key, find_value_callback ok, basic_cal
     find_value(p, util::sha1(key), ok, bad);
 }
 
+std::future<node::fut_t> node::_find_wrapper(bool fv, peer p, hash_t target_id) {
+    std::shared_ptr<std::promise<fut_t>> prom = std::make_shared<std::promise<fut_t>>();
+    std::future<fut_t> fut = prom->get_future();
+
+    if(fv) {
+        find_value(p, target_id,
+            [&, prom](peer p_, fv_value v) { prom->set_value(fut_t{std::move(p_), std::move(v)}); }, 
+            [&, prom](peer p_) { prom->set_value(fut_t{std::move(p_), fv_value{boost::blank()}}); });
+    } else {
+        find_node(p, target_id, 
+            [&, prom](peer p_, bucket v) { prom->set_value(fut_t{std::move(p_), std::move(v)}); },
+            [&, prom](peer p_) { prom->set_value(fut_t{std::move(p_), fv_value{boost::blank()}}); });        
+    }
+
+    return fut;
+}
+
+// synchronous operation
 fv_value node::lookup(bool fv, std::string fv_key, hash_t target_id) {
     std::list<peer> visited;
     bucket closest = table->find_bucket(peer(target_id));
 
     while(true) {
-        if(closest.empty())
+        if(closest.empty()) 
             return closest;
 
-        using fut_t = std::tuple<peer, fv_value>;
-
+        
         std::list<std::future<fut_t>> tasks;
         std::list<fut_t> responses;
-        bucket candidate(*table);
+        bucket candidate(table);
 
         // start queries
         for(peer p : closest) {
             visited.push_back(p);
 
-            tasks.push_back(std::async(
-                std::launch::async,
-                [&](peer p_) -> fut_t {
-                    std::promise<fut_t> prom;
-                    std::future<fut_t> fut = prom.get_future();
-
-                    if(fv) {
-                        find_value(p_, target_id,
-                            [&, pr = std::make_shared<std::promise<fut_t>>(std::move(prom))](peer p__, fv_value v) {
-                                pr->set_value(fut_t{std::move(p__), std::move(v)});
-                            }, net.queue.f_nothing);
-                    } else {
-                        find_node(p_, target_id,
-                            [&, pr = std::make_shared<std::promise<fut_t>>(std::move(prom))](peer p__, bucket v) {
-                                pr->set_value(fut_t{std::move(p__), std::move(v)});
-                            }, net.queue.f_nothing);
-                    }
-
-                    switch(fut.wait_for(seconds(proto::net_timeout))) {
-                    case std::future_status::ready: return fut.get();
-                    default: return fut_t{p_, fv_value(boost::blank{})};
-                    }
-                },
-                p
-            ));
+            tasks.push_back(_find_wrapper(fv, p, target_id));
         }
 
         // wait for responses
-        for(auto&& t : tasks)
-            responses.push_back(t.get());
+        for(auto&& t : tasks) {
+            try {
+                responses.push_back(t.get());
+            } catch (std::exception&) { }
+        }
 
         // remove empty responses
         responses.remove_if([&](fut_t v) { return std::get<1>(v).type() == typeid(boost::blank); });
@@ -384,15 +391,13 @@ fv_value node::lookup(bool fv, std::string fv_key, hash_t target_id) {
 void node::iter_store(std::string key, std::string value) {
     bucket b = iter_find_node(util::sha1(key));
 
-    for(auto i : b) {
-        spdlog::info("storing at {}:{} id {}", i.addr, i.port, util::htos(i.id));
+    for(auto i : b)
         store(i, key, value, basic_nothing, basic_nothing);
-    }
 }
 
 bucket node::iter_find_node(hash_t target_id) {
     fv_value v = lookup(false, std::string{}, target_id);
-    bucket b(*table);
+    bucket b(table);
     
     bucket& g = boost::get<bucket>(v);
     for(auto i : g)
@@ -403,6 +408,35 @@ bucket node::iter_find_node(hash_t target_id) {
 
 fv_value node::iter_find_value(std::string key) {
     return lookup(true, key, util::sha1(key));
+}
+
+void node::refresh_prefix(hash_t prefix) {
+    tree* ptr = table->root;
+    assert(ptr != nullptr);
+
+    int i = 0;
+    table->traverse(true, prefix, &ptr, i);
+
+    refresh(ptr);
+}
+
+void node::refresh(tree* ptr) {
+    if(ptr == nullptr) return;
+    if(!ptr->leaf) return;
+
+    hash_t randomness = util::gen_id(reng);
+    hash_t random_id = ptr->prefix.prefix | (randomness & ~ptr->prefix.prefix);
+    bucket bkt = iter_find_node(random_id);
+
+    if(!bkt.empty()) {
+        W_LOCK(table->mutex);
+        spdlog::debug("refreshed bucket {}, sz: {}", ptr->prefix.prefix.to_string(), ptr->data.size());
+        ptr->data = bkt;
+    }
+}
+
+void node::refresh_tree() {
+    table->dfs(std::bind(&node::refresh, this, _1));
 }
 
 }

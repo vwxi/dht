@@ -12,7 +12,7 @@ class network;
 
 class bucket : public std::list<peer> {
 public:
-    bucket(routing_table&);
+    bucket(std::shared_ptr<routing_table>);
     
     void update(peer, bool);
 
@@ -20,7 +20,7 @@ public:
 
     u64 last_seen;
     std::size_t max_size;
-    routing_table& table;
+    std::shared_ptr<routing_table> table;
 };
 
 }

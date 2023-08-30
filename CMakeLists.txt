@@ -6,18 +6,24 @@ project(
 	LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 14)
-set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g -O0 -fsanitize=address")
-set(CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_LINKER_FLAGS_DEBUG} -g -fsanitize=address")
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g -O0 -fsanitize=address,thread")
+set(CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_LINKER_FLAGS_DEBUG} -g -fsanitize=address,thread")
 
 set(Boost_USE_STATIC_LIBS OFF)
 set(Boost_USE_MULTITHREADED ON)
 set(Boost_USE_STATIC_RUNTIME OFF)
-find_package(Boost 1.50 REQUIRED COMPONENTS system)
+find_package(Boost 1.50 REQUIRED COMPONENTS system thread)
 
 if(NOT TARGET Boost::system)
 	add_library(Boost::system IMPORTED INTERFACE)
 	set_property(TARGET Boost::system PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${Boost_INCLUDE_DIR})
 	set_property(TARGET Boost::system PROPERTY INTERFACE_LINK_LIBRARIES ${Boost_LIBARIES})
+endif()
+
+if(NOT TARGET Boost::thread)
+	add_library(Boost::thread IMPORTED INTERFACE)
+	set_property(TARGET Boost::thread PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${Boost_INCLUDE_DIR})
+	set_property(TARGET Boost::thread PROPERTY INTERFACE_LINK_LIBRARIES ${Boost_LIBARIES})
 endif()
 
 find_package(msgpack-cxx REQUIRED)
@@ -59,4 +65,4 @@ target_include_directories(
 	"${PROJECT_SOURCE_DIR}/extern"
 )
 
-target_link_libraries(dht PUBLIC Boost::system spdlog::spdlog pthread msgpack-cxx)
+target_link_libraries(dht PUBLIC Boost::system Boost::thread spdlog::spdlog pthread msgpack-cxx)

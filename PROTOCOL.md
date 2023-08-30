@@ -14,8 +14,12 @@ as defined in `include/dht/util.hpp` and `include/dht/proto.h`:
 - number of missed messages allowed (`missed_messages_allowed`) (default: 3) (CHANGE!)
 - number of seconds until timeout (`net_timeout`) (default: 10) (CHANGE!)
 - number of candidate peers allowed in replacement cache (`repl_cache_size`) (default: 3)
-- max data size in bytes (`max_data_size`) (default: 65535) (CHANGE?)
+- max data size in bytes (`max_data_size`) (default: 65535)
 - `a` value from kademlia paper (`alpha`) (default: 3)
+- number of seconds until a bucket needs refreshing (`refresh_time`) (default: 3600)
+- number of seconds until a key-value pair expires (`republish_time`) (default: 86400)
+- number of seconds between each routing table refresh (`refresh_interval`) (default: 600)
+- number of seconds between key-value republications (`refresh_interval`) (default: 86400)
 
 ## messages
 

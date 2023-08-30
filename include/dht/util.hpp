@@ -24,16 +24,24 @@
 #include <cassert>
 #include <tuple>
 
+#undef NDEBUG
+#define BOOST_BIND_NO_PLACEHOLDERS
+
 #include <boost/asio.hpp>
 #include <boost/uuid/detail/sha1.hpp>
 #include <boost/optional.hpp>
 #include <boost/variant.hpp>
+#include <boost/thread/shared_mutex.hpp>
+#include <boost/thread/shared_lock_guard.hpp>
 
 #include <msgpack.hpp>
 
 #include "spdlog/spdlog.h"
 
 #define LOCK(m) std::lock_guard<std::mutex> l(m);
+#define R_LOCK(m) boost::shared_lock<boost::shared_mutex> l(m);
+#define W_LOCK(m) boost::upgrade_lock<boost::shared_mutex> l(m);
+#define TIME_NOW() duration_cast<seconds>(system_clock::now().time_since_epoch()).count()
 
 namespace tulip {
 
@@ -73,7 +81,10 @@ const int net_timeout = 10; // number of seconds until timeout
 const int repl_cache_size = 3; // number of peers allowed in bucket replacement cache at one time
 const u64 max_data_size = 65535; // max data size in bytes
 const int alpha = 3; // alpha from kademlia paper
-
+const int refresh_time = 3600; // number of seconds until a bucket needs refreshing
+const int republish_time = 86400; // number of seconds until a key-value pair expires
+const int refresh_interval = 600; // when to refresh buckets older than refresh_time, in seconds
+const int republish_interval = 86400; // when to republish data older than an republish_time, in seconds
 }
 
 typedef std::bitset<proto::bit_hash_width> hash_t;
@@ -112,7 +123,6 @@ static std::string htos(hash_t h) {
 
     std::stringstream ss;
     ss << std::hex;
-    std::cout << std::hex;
 
     for (auto b = bytes.rbegin(); b != bytes.rend(); ++b) {
         ss << std::setw(2) << std::setfill('0') << static_cast<int>(*b);
@@ -206,6 +216,12 @@ static hash_t sha1(std::string s) {
     sha1.process_bytes(s.c_str(), s.size());
     sha1.get_digest(h);
     return util::htob(h);
+}
+
+template <typename M, typename F, typename... Args>
+static auto lock_fn(M& mut, F&& fn, Args&&... args) {
+    LOCK(mut);
+    return std::forward<F>(fn)(std::forward<Args>(args)...);
 }
 
 }

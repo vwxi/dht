@@ -18,7 +18,8 @@ public:
 
     void init();
 
-    void traverse(hash_t, tree**, int&);
+    void traverse(bool, hash_t, tree**, int&);
+    void dfs(std::function<void(tree*)>);
     void split(tree*, int);
     void update(peer);
     void evict(peer);
@@ -30,23 +31,30 @@ public:
     
     network& net;
 
-    std::mutex mutex;
+    boost::shared_mutex mutex;
+
+    tree* root;
 
 private:
+    void _dfs(std::function<void(tree*)>, tree*);
+
     std::shared_ptr<routing_table> strong_ref;
-    tree* root;
 };
 
 struct tree {
-    struct tree* left;
-    struct tree* right;
+    tree* left;
+    tree* right;
+    struct { 
+        hash_t prefix;
+        int cutoff;
+    } prefix;
     bucket data;
     bool leaf;
 
     std::list<peer> cache;
     std::mutex cache_mutex;
 
-    tree(routing_table&);
+    tree(std::shared_ptr<routing_table>);
     ~tree();
 };
 

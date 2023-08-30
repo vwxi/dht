@@ -20,7 +20,7 @@ using find_value_callback = std::function<void(peer, fv_value)>;
 class node {
 public:
     node(u16);
-    ~node() = default;
+    ~node();
 
     proto::status put(std::string, std::string);
     fv_value get(std::string);
@@ -32,9 +32,16 @@ public:
     fv_value iter_find_value(std::string);
     
 private:
-    basic_callback basic_nothing = [](peer) { };
+    using fut_t = std::tuple<peer, fv_value>;
 
+    basic_callback basic_nothing = [](peer) { };
+    
+    std::future<fut_t> _find_wrapper(bool, peer, hash_t);
     fv_value lookup(bool, std::string, hash_t);
+
+    void refresh_prefix(hash_t);
+    void refresh(tree*);
+    void refresh_tree();
 
     // async interfaces
     void store(peer, std::string, std::string, basic_callback, basic_callback);
@@ -59,6 +66,8 @@ private:
 
     std::random_device rd;
     std::default_random_engine reng;
+
+    std::thread refresh_thread;
 };
 
 }

@@ -27,4 +27,5 @@ cmake --build .
 - refresh
 - republish
 - document everything
+- disjoint path lookups
 - tests
