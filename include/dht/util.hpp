@@ -23,6 +23,7 @@
 #include <cstdint>
 #include <cassert>
 #include <tuple>
+#include <deque>
 
 #undef NDEBUG
 #define BOOST_BIND_NO_PLACEHOLDERS

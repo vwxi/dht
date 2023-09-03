@@ -27,7 +27,7 @@ int main(int argc, char** argv) {
                     bucket b = n.iter_find_node(0xb00b1e5);
                     spdlog::info("iter_find_node ->");
                     for(auto i : b)
-                        spdlog::info("\t{}:{} id {}", i.addr, i.port, util::htos(i.id));
+                        spdlog::info("\t{}", i());
                 }, 
                 [](peer){});
         }
@@ -52,12 +52,20 @@ int main(int argc, char** argv) {
                     if(v.type() == typeid(bucket)) {
                         spdlog::info("\tno value found, bucket instead:");
                         for(auto i : boost::get<bucket>(v))
-                            spdlog::info("\t\t{}:{} id {}", i.addr, i.port, util::htos(i.id));
+                            spdlog::info("\t\t{}", i());
                     } else {
                         spdlog::info("\tvalue found, value is: {}", boost::get<std::string>(v));
                     }
                 }, 
                 [](peer){});
+        }
+        break;
+    case 6: // join
+        {
+            node n(std::atoi(argv[2]));
+            n.join(peer(argv[3], std::atoi(argv[4])),
+                [&](peer) { spdlog::info("join was a success."); },
+                [&](peer) { spdlog::info("join was a failure."); });
         }
         break;
     }

@@ -17,7 +17,7 @@ void bucket::update(peer req, bool nearby) {
 
     if(!nearby) {
         peer beg = *begin();
-        spdlog::debug("checking if node {} ({}:{}) is alive", util::htos(beg.id), beg.addr, beg.port);
+        spdlog::debug("checking if node {} is alive", beg());
 
         table->net.send(true,
             beg, proto::type::query, proto::actions::ping, 
@@ -54,12 +54,6 @@ void bucket::update(peer req, bool nearby) {
 
 end:
     last_seen = TIME_NOW();
-}
-
-// is bucket closer to t than b
-bool bucket::closer(const bucket& b, hash_t t) {
-    auto cmp = [t](peer a, peer b) { return a.distance(t) < b.distance(t); };
-    return std::min_element(begin(), end(), cmp)->id < std::min_element(b.begin(), b.end(), cmp)->id;
 }
 
 }

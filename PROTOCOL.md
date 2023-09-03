@@ -310,3 +310,7 @@ where the stored value is either a string or nil depending on whether or not it 
                 ]
         }
 ```
+
+## operations
+
+joins, refreshes and republishes are all described in [xlattice/kademlia](https://xlattice.sourceforge.net/components/protocol/kademlia/specs.html)

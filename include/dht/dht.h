@@ -24,7 +24,8 @@ public:
 
     proto::status put(std::string, std::string);
     fv_value get(std::string);
-    void join(peer);
+    
+    void join(peer, basic_callback, basic_callback);
 
     void ping(peer, basic_callback, basic_callback);
     void iter_store(std::string, std::string);

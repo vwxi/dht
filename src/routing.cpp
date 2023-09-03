@@ -9,11 +9,11 @@
 #define TRAVERSE \
     tree* ptr = NULL; \
     bucket::iterator it; \
-    int i = 0; \
+    int cutoff = 0; \
     { \
         R_LOCK(mutex); \
         ptr = root; \
-        traverse(false, req.id, &ptr, i); \
+        traverse(false, req.id, &ptr, cutoff); \
         assert(ptr != nullptr); \
         it = std::find_if(ptr->data.begin(), ptr->data.end(), \
             [&](const peer& p) { return p.id == req.id; }); \
@@ -40,17 +40,18 @@ void routing_table::init() {
     W_LOCK(mutex);
 
     root = new tree(shared_from_this());
-    root->prefix.prefix = id & (hash_t(1) << proto::bit_hash_width);
-    root->prefix.cutoff = proto::bit_hash_width;
+    root->parent = nullptr;
+    root->prefix.prefix = hash_t(0);
+    root->prefix.cutoff = 0;
 }
 
 /// @brief take a ptr to the ptr of some root and traverse based on bits of id
-void routing_table::traverse(bool p, hash_t t, tree** ptr, int& i) {
+void routing_table::traverse(bool p, hash_t t, tree** ptr, int& cutoff) {
     if(!ptr) return;
     if(!*ptr) return;
 
     while((*(*ptr)).leaf == false) {
-        if(t[proto::bit_hash_width - i++]) {
+        if(t[proto::bit_hash_width - cutoff++]) {
             if(!(*(*ptr)).right) { *ptr = NULL; return; }
             else if(p && (*ptr)->right->leaf) return;
             *ptr = (*ptr)->right;
@@ -63,23 +64,25 @@ void routing_table::traverse(bool p, hash_t t, tree** ptr, int& i) {
 }
 
 /// @brief split a tree ptr into two subtrees, categorize contained nodes into new subtrees
-void routing_table::split(tree* t, int i) {
+void routing_table::split(tree* t, int cutoff) {
     if(!t) return;
 
     t->left = new tree(shared_from_this());
     if(!t->left) return;
+    t->left->parent = t;
     t->left->prefix.prefix = t->prefix.prefix;
-    t->left->prefix.cutoff = i + 1;
+    t->left->prefix.cutoff = cutoff + 1;
 
     t->right = new tree(shared_from_this());
     if(!t->right) return;
-    t->right->prefix.prefix = t->prefix.prefix | (hash_t(1) << (proto::bit_hash_width - i));
-    t->right->prefix.cutoff = i + 1;
+    t->right->parent = t;
+    t->right->prefix.prefix = t->prefix.prefix | (hash_t(1) << (proto::bit_hash_width - cutoff));
+    t->right->prefix.cutoff = cutoff + 1;
 
     t->leaf = false;
 
     for(auto& it : t->data) {
-        if(it.id[proto::bit_hash_width - i]) {
+        if(it.id[proto::bit_hash_width - cutoff]) {
             t->right->data.push_back(it);
         } else { 
             t->left->data.push_back(it);
@@ -99,19 +102,19 @@ void routing_table::update(peer req) {
 
     W_LOCK(mutex);
 
-    hash_t prefix(~hash_t(0) << (proto::bit_hash_width - i));
+    hash_t mask(~hash_t(0) << (proto::bit_hash_width - cutoff));
     
     if(ptr->data.size() < ptr->data.max_size) {
         spdlog::debug("bucket isn't full, update node {}", util::htos(req.id));
         // bucket is not full, update node
         ptr->data.update(req, true);
     } else {
-        if((req.id & prefix) == (id & prefix)) {
+        if((req.id & mask) == (id & mask)) {
             if(it == ptr->data.end()) {
                 spdlog::debug("bucket is within prefix, split");
                 // bucket is full and within our own prefix, split
                 /// @todo relaxed splitting, see https://stackoverflow.com/questions/32129978/highly-unbalanced-kademlia-routing-table/32187456#32187456
-                split(ptr, i);
+                split(ptr, cutoff);
             } else {
                 spdlog::debug("bucket is nearby and full");
                 // bucket is full but nearby, update node
@@ -211,18 +214,15 @@ int routing_table::stale(peer req) {
 }
 
 void routing_table::_dfs(std::function<void(tree*)> fn, tree* ptr) {
-    if(ptr == nullptr) return;
+    if(ptr == nullptr) 
+        return;
 
     R_LOCK(mutex);
 
-    if(ptr->leaf && ptr->data.empty()) return;
-
-    auto time_since = TIME_NOW() - ptr->data.last_seen;
-
-    if(ptr->leaf && time_since > proto::refresh_time) {
-        fn(ptr);
+    if(ptr->leaf && ptr->data.empty()) 
         return;
-    }
+
+    fn(ptr);
 
     if(ptr->left) _dfs(fn, ptr->left);
     if(ptr->right) _dfs(fn, ptr->right);
@@ -231,6 +231,30 @@ void routing_table::_dfs(std::function<void(tree*)> fn, tree* ptr) {
 void routing_table::dfs(std::function<void(tree*)> fn) {
     tree* ptr = root;
     _dfs(fn, ptr);
+}
+
+std::deque<peer> routing_table::find_alpha(peer req) {
+    TRAVERSE;
+
+    R_LOCK(mutex);
+
+    std::deque<peer> res;
+
+    int n = 0;
+    for(const auto& e : ptr->data) {
+        if(n++ < proto::alpha)
+            res.push_back(e);
+        else break;
+    }
+
+    // try and get more contacts from sibling tree nodes if there aren't enough 
+    if(res.size() < proto::alpha && ptr->parent != nullptr) {
+        ptr = ptr->parent->left == ptr ? ptr->parent->right : ptr->parent->left;
+        std::copy_n(ptr->data.begin(), proto::alpha - res.size(), std::back_inserter(res));
+    }
+
+    // nothing we can do afterwards
+    return res;
 }
 
 }

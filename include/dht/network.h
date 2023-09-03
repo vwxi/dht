@@ -20,7 +20,7 @@ struct peer {
     peer(std::string a, u16 p) : addr(a), port(p), staleness(0), id(0) { }
     udp::endpoint endpoint() const { return udp::endpoint{boost::asio::ip::address::from_string(addr), port}; }
     bool operator==(const peer& rhs) const { return !addr.compare(rhs.addr) && port == rhs.port; }
-    hash_t distance(hash_t from) { return id ^ from; }
+    std::string operator()() { return fmt::format("{}:{}:{}", addr, port, util::htos(id)); }
 };
 
 class msg_queue {

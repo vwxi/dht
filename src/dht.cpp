@@ -294,97 +294,72 @@ std::future<node::fut_t> node::_find_wrapper(bool fv, peer p, hash_t target_id) 
 }
 
 // synchronous operation
+// see xlattice/kademlia lookup
 fv_value node::lookup(bool fv, std::string fv_key, hash_t target_id) {
     std::list<peer> visited;
-    bucket closest = table->find_bucket(peer(target_id));
+    std::deque<peer> shortlist = table->find_alpha(peer(target_id));
+    bucket res(table);
 
-    while(true) {
-        if(closest.empty()) 
-            return closest;
+    peer closest_node = *std::min_element(shortlist.begin(), shortlist.end(), 
+        [target_id](peer a, peer b) { return (a.id ^ target_id) < (b.id ^ target_id); });
 
-        
+    auto filter = [&, this](peer a) { return std::count(visited.begin(), visited.end(), a) != 0 || a.id == id; };
+
+    while(!shortlist.empty()) {
         std::list<std::future<fut_t>> tasks;
-        std::list<fut_t> responses;
-        bucket candidate(table);
 
-        // start queries
-        for(peer p : closest) {
+        // send out alpha RPCs
+        int n = 0;
+        for(peer contact : shortlist) {
+            if(n++ < proto::alpha) {
+                auto i = shortlist.front();
+                tasks.push_back(_find_wrapper(fv, shortlist.front(), target_id));
+                shortlist.pop_front();
+            } else break;
+        }
+
+        // get back replies
+        for(auto&& t : tasks) {
+            fut_t f = t.get();
+            peer p = std::get<0>(f);
+            fv_value v = std::get<1>(f);
+
             visited.push_back(p);
 
-            tasks.push_back(_find_wrapper(fv, p, target_id));
-        }
+            if(v.type() == typeid(bucket)) {
+                // The node then fills the shortlist with contacts from the replies received.
+                for(peer p_ : boost::get<bucket>(v)) {
+                    if(!filter(p_)) {
+                        shortlist.push_back(p_);
 
-        // wait for responses
-        for(auto&& t : tasks) {
-            try {
-                responses.push_back(t.get());
-            } catch (std::exception&) { }
-        }
-
-        // remove empty responses
-        responses.remove_if([&](fut_t v) { return std::get<1>(v).type() == typeid(boost::blank); });
-
-        // end if we don't have any responses
-        if(responses.empty())
-            break;
-
-        std::list<fut_t> sub;
-        std::copy_if(responses.begin(), responses.end(), std::back_inserter(sub),
-            [&](const fut_t& f) { return std::get<1>(f).type() != typeid(std::string); });
-
-        // check if an actual value came through
-        for(auto r : responses) {
-            // we got a value, return immediately
-            peer pr = std::get<0>(r);
-            fv_value v = std::get<1>(r);
-            
-            if(v.type() == typeid(std::string) && fv) {
+                        // res is a list of all successfully contacted peers, shortlist is just a queue
+                        res.push_back(p_);
+                    }
+                }
+            } else if(v.type() == typeid(std::string) && fv) {
                 // When an iterativeFindValue succeeds, the initiator must store the key/value pair at the 
                 // closest node seen which did not return the value. (xlattice/kademlia)
-
-                std::string r_ = boost::get<std::string>(v);
-
-                std::list<fut_t>::iterator i = std::min_element(sub.begin(), sub.end(),
-                    [&](fut_t a, fut_t b) { 
-                        return std::get<0>(a).distance(target_id) < std::get<0>(b).distance(target_id); 
-                    });
-
-                if(i != sub.end()) {
-                    peer cl = std::get<0>(*i);
-                    store(cl, fv_key, r_, basic_nothing, basic_nothing);
-                }
+                std::string s = boost::get<std::string>(v);
+                store(closest_node, fv_key, s, basic_nothing, basic_nothing);
 
                 return v;
             }
         }
 
-        if(sub.empty())
-            break;
-        
-        // from here on it's exclusively buckets, look for next candidate bucket
-        auto it = std::min_element(sub.begin(), sub.end(),
-            [&](fut_t a, fut_t b) { return boost::get<bucket>(std::get<1>(a)).closer(boost::get<bucket>(std::get<1>(b)), target_id); });
+        peer candidate = *std::min_element(shortlist.begin(), shortlist.end(), 
+            [target_id](peer a, peer b) { return (a.id ^ target_id) < (b.id ^ target_id); });
 
-        bucket& g = boost::get<bucket>(std::get<1>(*it));
-        std::copy(g.begin(), g.end(), std::back_inserter(candidate));
-
-        // remove already visited peers and ourselves
-        candidate.remove_if([&](peer a) {
-            return std::count(visited.begin(), visited.end(), a) != 0 || a.id == id;
-        });
-
-        // end if we don't have a candidate anymore
-        if(candidate.empty())
-            break;
-
-        // if we got a closer candidate, make candidate the closest and iterate 
-        if(candidate.closer(closest, target_id)) {
-            closest.clear();
-            std::copy(candidate.cbegin(), candidate.cend(), std::back_inserter(closest));
+        if((candidate.id ^ target_id) < (closest_node.id ^ target_id)) {
+            closest_node = candidate;
         } else break;
     }
 
-    return closest;
+    res.sort([&](peer a, peer b) { return (a.id ^ target_id) < (b.id ^ target_id); });
+
+    if(res.size() > proto::bucket_size)
+        res.resize(proto::bucket_size);
+
+    return res;
 }
 
 /// @todo store should include timestamp
@@ -423,20 +398,49 @@ void node::refresh_prefix(hash_t prefix) {
 void node::refresh(tree* ptr) {
     if(ptr == nullptr) return;
     if(!ptr->leaf) return;
-
+    
     hash_t randomness = util::gen_id(reng);
-    hash_t random_id = ptr->prefix.prefix | (randomness & ~ptr->prefix.prefix);
+    hash_t mask = ~hash_t(0) << (proto::bit_hash_width - ptr->prefix.cutoff);
+    hash_t random_id = ptr->prefix.prefix | (randomness & ~mask);
     bucket bkt = iter_find_node(random_id);
 
     if(!bkt.empty()) {
         W_LOCK(table->mutex);
-        spdlog::debug("refreshed bucket {}, sz: {}", ptr->prefix.prefix.to_string(), ptr->data.size());
         ptr->data = bkt;
+        spdlog::debug("refreshed bucket {}, sz: {}", ptr->prefix.prefix.to_string(), ptr->data.size());
     }
 }
 
 void node::refresh_tree() {
-    table->dfs(std::bind(&node::refresh, this, _1));
+    table->dfs([&, this](tree* ptr) {
+        auto time_since = TIME_NOW() - ptr->data.last_seen;
+        if(time_since > proto::refresh_time)
+            refresh(ptr);
+    });
+}
+
+void node::join(peer p_, basic_callback ok, basic_callback bad) {
+    // add peer to routing table
+    ping(p_, [&, this](peer p) {
+        // lookup our own id
+        bucket bkt = iter_find_node(id);
+
+        // populate routing table
+        for(auto i : bkt) {
+            table->update(i);
+        }
+
+        
+        // it refreshes all buckets further away than its closest neighbor, 
+        // which will be in the occupied bucket with the lowest index.
+        table->dfs([&, this](tree* ptr) {
+            hash_t mask(~hash_t(0) << (proto::bit_hash_width - ptr->prefix.cutoff));
+            if((p.id & mask) != ptr->prefix.prefix)
+                refresh(ptr);
+        });
+
+        ok(p);
+    }, bad);
 }
 
 }

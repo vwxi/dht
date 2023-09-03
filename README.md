@@ -23,8 +23,6 @@ cmake --build .
 
 ## list of stuff to do
 
-- join
-- refresh
 - republish
 - document everything
 - disjoint path lookups

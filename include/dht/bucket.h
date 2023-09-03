@@ -16,8 +16,6 @@ public:
     
     void update(peer, bool);
 
-    bool closer(const bucket&, hash_t);
-
     u64 last_seen;
     std::size_t max_size;
     std::shared_ptr<routing_table> table;
