@@ -8,21 +8,6 @@
 namespace tulip {
 namespace dht {
 
-struct peer {
-    hash_t id;
-    std::string addr;
-    u16 port;
-    int staleness;
-
-    peer() { }
-    peer(hash_t id_) : id(id_) { }
-    peer(std::string a, u16 p, hash_t id_) : addr(a), port(p), staleness(0), id(id_) { }
-    peer(std::string a, u16 p) : addr(a), port(p), staleness(0), id(0) { }
-    udp::endpoint endpoint() const { return udp::endpoint{boost::asio::ip::address::from_string(addr), port}; }
-    bool operator==(const peer& rhs) const { return !addr.compare(rhs.addr) && port == rhs.port; }
-    std::string operator()() { return fmt::format("{}:{}:{}", addr, port, util::htos(id)); }
-};
-
 class msg_queue {
 public:
     using q_callback = std::function<void(peer, std::string)>;

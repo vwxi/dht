@@ -46,6 +46,12 @@ one message per client should be handled at any time. a client should not have m
 }
 ```
 
+peer objects are formatted like so:
+
+```
+{ "a": <address>, "p": <port>, "i": <serialized ID> }
+```
+
 #### schema version
 
 as of the writing of this document, schema version will always be `0x00` until changes are made to the protocol
@@ -65,6 +71,7 @@ there are four actions:
 - store (`0x01`)
 - find_node (`0x02`)
 - find_value (`0x03`)
+- resolve (`0x04`)
 
 #### serialized ID
 
@@ -127,18 +134,28 @@ for sender,
 "d": {
         "k": <key>,
         "v": <binary data>
+        "o": <origin>
 }
 ```
 
 for recipient,
 ```
 "d": {
+        "t": <timestamp>
         "c": <checksum>,
         "s": <status>
 }
 ```
 
-where the key is a plaintext string, the binary data is a string containing the value, the checksum is a 32-bit checksum (crc-32) of the stored value and the status is an integer detailing whether or not the store was successful (zero = ok, nonzero = error) 
+where:
+- the key (serialized ID)
+- binary data (string)
+- origin (peer object or nil)
+- timestamp (64-bit integer timestamp)
+- checksum (32-bit integer)
+- status (integer, zero = ok, nonzero = error)
+
+if the origin is nil, then the sender is the origin of the key-value pair
 
 #### sequence
 
@@ -151,8 +168,9 @@ where the key is a plaintext string, the binary data is a string containing the 
         "i": "0b00b1e5",
         "q": 103581305802345,
         "d": {
-                "k": "boobies",
-                "v": a3 e5 1d 0f 9e ... 6e 77 3a 0e 9f
+                "k": "abb12e35",
+                "v": a3 e5 1d 0f 9e ... 6e 77 3a 0e 9f,
+                "o": { "a": "127.0.0.1", "p": 10001, "i": "00a0a001" }
         }
 }
 ```
@@ -166,6 +184,7 @@ where the key is a plaintext string, the binary data is a string containing the 
         "i": "177ff13e",
         "q": 103581305802345,
         "d": {
+                "t": 15019835313561,
                 "c": 10010501359,
                 "s": 0
         }
@@ -256,12 +275,21 @@ for recipient,
 
 ```
 "d": {
-        "v": <stored value>,
-        "b": <nearest nodes>
+        "v": {
+              "v": <stored value>,
+              "o": <origin>,
+              "t": <timestamp>  
+        } OR nil,
+        "b": <nearest nodes> OR nil
 }
 ```
 
-where the stored value is either a string or nil depending on whether or not it was found in the recipient's hash table and the nearest nodes either being an array of nodes or nil depending on the same factors as the stored value  
+where:
+- v (nil if value not found):
+  - stored value (string)
+  - origin (peer object)
+  - timestamp (64-bit integer)
+- nearest nodes (array of nodes if value not found, nil if value found)
 
 `find_value` **cannot** return **both** a stored value and a node array, such messages should be rejected
 
@@ -289,7 +317,11 @@ where the stored value is either a string or nil depending on whether or not it 
         "i": "177ff13e",
         "q": 103581305802345,
         "d": {
-                "v": 1e e5 6a 2e 90 ... a0 e4 b7 61 d8,
+                "v": {
+                        "v": 1e e5 6a 2e 90 ... a0 e4 b7 61 d8,
+                        "o": {"a": "127.0.0.1", "p": 16006, "i": "1ab301d1"},
+                        "t": 196182340981z
+                },
                 "b": nil
         }
 ```
@@ -310,6 +342,10 @@ where the stored value is either a string or nil depending on whether or not it 
                 ]
         }
 ```
+
+### resolve (`0x04`)
+
+TODO...
 
 ## operations
 

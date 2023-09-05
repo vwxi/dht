@@ -94,6 +94,10 @@ typedef u32 id_t[proto::hash_width];
 
 namespace util { // utilities
 
+static u64 time_now() {
+    return duration_cast<seconds>(system_clock::now().time_since_epoch()).count();
+}
+
 inline void hash_combine(std::size_t& seed) { }
 
 template <typename T, typename... Rest>

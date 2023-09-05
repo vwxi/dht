@@ -54,7 +54,8 @@ int main(int argc, char** argv) {
                         for(auto i : boost::get<bucket>(v))
                             spdlog::info("\t\t{}", i());
                     } else {
-                        spdlog::info("\tvalue found, value is: {}", boost::get<std::string>(v));
+                        kv vl = boost::get<kv>(v);
+                        spdlog::info("\tvalue found, value is: {}, timestamp is {}, origin is {}", vl.value, vl.timestamp, vl.origin());
                     }
                 }, 
                 [](peer){});

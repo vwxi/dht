@@ -56,14 +56,14 @@ void node::handle_store(peer p, proto::message msg) {
         proto::store_query_data d;
         msg.d.convert(d);
 
-        hash_t k(util::sha1(d.k));
+        hash_t k(util::to_bin(d.k));
         u32 chksum = util::crc32b((u8*)d.v.data());
 
         int s = proto::status::ok;
-
+        
         try {
             LOCK(ht_mutex);
-            ht[k] = d.v;
+            ht[k] = kv(k, d.v, d.o.has_value() ? d.o.value().to_peer() : p, util::time_now());
         } catch (std::exception&) { s = proto::status::bad; }
 
         net.send(false,
@@ -75,6 +75,8 @@ void node::handle_store(peer p, proto::message msg) {
     } else if(msg.m == proto::type::response) {
         proto::store_resp_data d;
         msg.d.convert(d);
+
+        // we don't care about the timestamp
 
         // find a more elegant way to do this
         std::stringstream ss;
@@ -95,9 +97,9 @@ void node::handle_find_node(peer p, proto::message msg) {
         hash_t target_id(util::to_bin(d.t));
         bucket bkt = table->find_bucket(peer(target_id));
 
-        std::vector<proto::bucket_peer> b;
+        std::vector<proto::peer_object> b;
         for(auto i : bkt)
-            b.push_back(proto::bucket_peer{i.addr, i.port, util::htos(i.id)});
+            b.push_back(proto::peer_object(i.addr, i.port, util::htos(i.id)));
 
         net.send(false,
             p, proto::type::response, proto::actions::find_node,
@@ -141,15 +143,19 @@ void node::handle_find_value(peer p, proto::message msg) {
                 // key exists in hash table
                 net.send(false,
                     p, proto::type::response, proto::actions::find_value,
-                    id, msg.q, proto::find_value_resp_data { .v = it->second, .b = boost::none },
+                    id, msg.q, proto::find_value_resp_data{ .v = proto::stored_data{
+                        .v = it->second.value,
+                        .o = proto::peer_object(it->second.origin),
+                        .t = util::time_now()
+                    }, .b = boost::none },
                     net.queue.q_nothing, net.queue.f_nothing);
             } else {
                 // key does not exist in hash table
                 bucket bkt = table->find_bucket(peer(target_id));
 
-                std::vector<proto::bucket_peer> b;
+                std::vector<proto::peer_object> b;
                 for(auto i : bkt)
-                    b.push_back(proto::bucket_peer{i.addr, i.port, util::htos(i.id)});
+                    b.push_back(proto::peer_object{i.addr, i.port, util::htos(i.id)});
 
                 net.send(false,
                     p, proto::type::response, proto::actions::find_value,
@@ -194,12 +200,16 @@ void node::ping(peer p, basic_callback ok, basic_callback bad) {
         });
 }
 
-void node::store(peer p, std::string key, std::string value, basic_callback ok, basic_callback bad) {
-    u32 chksum = util::crc32b((u8*)value.data());
+void node::store(bool origin, peer p, kv val, basic_callback ok, basic_callback bad) {
+    u32 chksum = util::crc32b((u8*)val.value.data());
+
+    boost::optional<proto::peer_object> po = origin ? 
+        boost::optional<proto::peer_object>(boost::none) : 
+        boost::optional<proto::peer_object>(proto::peer_object(val.origin));
 
     net.send(true,
         p, proto::type::query, proto::actions::store,
-        id, util::msg_id(), proto::store_query_data{ .k = key, .v = value },
+        id, util::msg_id(), proto::store_query_data{ .k = util::htos(val.key), .v = val.value, .o = po },
         [this, ok, bad, chksum](peer p_, std::string s) { 
             u32 csum;
             std::stringstream ss;
@@ -245,17 +255,17 @@ void node::find_value(peer p, hash_t target_id, find_value_callback ok, basic_ca
     net.send(true,
         p, proto::type::query, proto::actions::find_value,
         id, util::msg_id(), proto::find_query_data { .t = util::htos(target_id) },
-        [this, ok, bad](peer p_, std::string s) {
+        [this, ok, bad, target_id](peer p_, std::string s) {
             msgpack::object_handle oh;
             msgpack::unpack(oh, s.data(), s.size());
             msgpack::object obj = oh.get();
             proto::find_value_resp_data d;
             obj.convert(d);
 
-            if((d.v == boost::none) != (d.b == boost::none)) {
-                if(d.v != boost::none) {
-                    ok(p_, d.v.value());
-                } else if(d.b != boost::none) {
+            if(!d.v.has_value() != !d.b.has_value()) {
+                if(d.v.has_value()) {
+                    ok(p_, kv(target_id, d.v.value()));
+                } else if(d.b.has_value()) {
                     bucket bkt(table);
 
                     for(auto i : d.b.value())
@@ -326,21 +336,21 @@ fv_value node::lookup(bool fv, std::string fv_key, hash_t target_id) {
 
             visited.push_back(p);
 
+            // res is a list of all successfully contacted peers, shortlist is just a queue
+            if(v.type() != typeid(boost::none))
+                res.push_back(p);
+
             if(v.type() == typeid(bucket)) {
                 // The node then fills the shortlist with contacts from the replies received.
                 for(peer p_ : boost::get<bucket>(v)) {
-                    if(!filter(p_)) {
+                    if(!filter(p_))
                         shortlist.push_back(p_);
-
-                        // res is a list of all successfully contacted peers, shortlist is just a queue
-                        res.push_back(p_);
-                    }
                 }
-            } else if(v.type() == typeid(std::string) && fv) {
+            } else if(v.type() == typeid(kv) && fv) {
                 // When an iterativeFindValue succeeds, the initiator must store the key/value pair at the 
                 // closest node seen which did not return the value. (xlattice/kademlia)
-                std::string s = boost::get<std::string>(v);
-                store(closest_node, fv_key, s, basic_nothing, basic_nothing);
+                kv vl = boost::get<kv>(v);
+                store(false, closest_node, vl, basic_nothing, basic_nothing);
 
                 return v;
             }
@@ -354,6 +364,7 @@ fv_value node::lookup(bool fv, std::string fv_key, hash_t target_id) {
         } else break;
     }
 
+    res.remove_if([this](peer a) { return a.id == id; });
     res.sort([&](peer a, peer b) { return (a.id ^ target_id) < (b.id ^ target_id); });
 
     if(res.size() > proto::bucket_size)
@@ -362,12 +373,23 @@ fv_value node::lookup(bool fv, std::string fv_key, hash_t target_id) {
     return res;
 }
 
-/// @todo store should include timestamp
+// this is for a new key-value pair
 void node::iter_store(std::string key, std::string value) {
-    bucket b = iter_find_node(util::sha1(key));
+    hash_t hash = util::sha1(key);
+    bucket b = iter_find_node(hash);
+    // ignores the peer object anyways
+    kv vl(hash, value, peer(), util::time_now());
 
     for(auto i : b)
-        store(i, key, value, basic_nothing, basic_nothing);
+        store(true, i, vl, basic_nothing, basic_nothing);
+}
+
+// this is for republishing
+void node::republish(kv val) {
+    bucket b = iter_find_node(val.key);
+
+    for(auto i : b)
+        store(true, i, val, basic_nothing, basic_nothing);
 }
 
 bucket node::iter_find_node(hash_t target_id) {
@@ -419,6 +441,7 @@ void node::refresh_tree() {
     });
 }
 
+/// @todo resolve to get our own IP?
 void node::join(peer p_, basic_callback ok, basic_callback bad) {
     // add peer to routing table
     ping(p_, [&, this](peer p) {
@@ -430,7 +453,6 @@ void node::join(peer p_, basic_callback ok, basic_callback bad) {
             table->update(i);
         }
 
-        
         // it refreshes all buckets further away than its closest neighbor, 
         // which will be in the occupied bucket with the lowest index.
         table->dfs([&, this](tree* ptr) {

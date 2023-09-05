@@ -10,7 +10,17 @@
 namespace tulip {
 namespace dht {
 
-using fv_value = boost::variant<boost::blank, std::string, bucket>;
+struct kv {
+    hash_t key;
+    std::string value;
+    peer origin;
+    u64 timestamp;
+    kv() { }
+    kv(hash_t k, const proto::stored_data& s) : key(k), value(s.v), origin(s.o.to_peer()), timestamp(s.t) { } 
+    kv(hash_t k, std::string v, peer o, u64 t) : key(k), value(v), origin(o), timestamp(t) { } 
+};
+
+using fv_value = boost::variant<boost::blank, kv, bucket>;
 
 // callback types
 using basic_callback = std::function<void(peer)>;
@@ -44,8 +54,10 @@ private:
     void refresh(tree*);
     void refresh_tree();
 
+    void republish(kv);
+    
     // async interfaces
-    void store(peer, std::string, std::string, basic_callback, basic_callback);
+    void store(bool, peer, kv, basic_callback, basic_callback);
     void find_node(peer, hash_t, bucket_callback, basic_callback);
     void find_value(peer, hash_t, find_value_callback, basic_callback);
     void find_value(peer, std::string, find_value_callback, basic_callback);
@@ -63,7 +75,7 @@ private:
     std::weak_ptr<routing_table> table_ref;
 
     std::mutex ht_mutex;
-    std::unordered_map<hash_t, std::string> ht;
+    std::unordered_map<hash_t, kv> ht;
 
     std::random_device rd;
     std::default_random_engine reng;
