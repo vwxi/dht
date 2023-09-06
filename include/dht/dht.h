@@ -50,12 +50,9 @@ private:
     std::future<fut_t> _find_wrapper(bool, peer, hash_t);
     fv_value lookup(bool, std::string, hash_t);
 
-    void refresh_prefix(hash_t);
     void refresh(tree*);
-    void refresh_tree();
-
     void republish(kv);
-    
+
     // async interfaces
     void store(bool, peer, kv, basic_callback, basic_callback);
     void find_node(peer, hash_t, bucket_callback, basic_callback);
@@ -81,6 +78,7 @@ private:
     std::default_random_engine reng;
 
     std::thread refresh_thread;
+    std::thread republish_thread;
 };
 
 }

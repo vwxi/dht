@@ -86,6 +86,7 @@ const int refresh_time = 3600; // number of seconds until a bucket needs refresh
 const int republish_time = 86400; // number of seconds until a key-value pair expires
 const int refresh_interval = 600; // when to refresh buckets older than refresh_time, in seconds
 const int republish_interval = 86400; // when to republish data older than an republish_time, in seconds
+
 }
 
 typedef std::bitset<proto::bit_hash_width> hash_t;

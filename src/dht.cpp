@@ -27,13 +27,32 @@ node::node(u16 port) :
     refresh_thread = std::thread([&, this]() {
         while(true) {
             std::this_thread::sleep_for(seconds(proto::refresh_interval));
-            refresh_tree();
+            table->dfs([&, this](tree* ptr) {
+                auto time_since = TIME_NOW() - ptr->data.last_seen;
+                if(time_since > proto::refresh_time)
+                    refresh(ptr);
+            });
+        }
+    });
+
+    republish_thread = std::thread([&, this]() {
+        while(true) {
+            std::this_thread::sleep_for(seconds(proto::refresh_interval));
+            
+            {
+                LOCK(ht_mutex);
+                for(const auto& entry : ht) {
+                    if(util::time_now() - entry.second.timestamp > proto::republish_time)
+                        republish(entry.second);
+                }
+            }
         }
     });
 }
 
 node::~node() {
     refresh_thread.join();
+    republish_thread.join();
 }
 
 /// handlers
@@ -389,7 +408,7 @@ void node::republish(kv val) {
     bucket b = iter_find_node(val.key);
 
     for(auto i : b)
-        store(true, i, val, basic_nothing, basic_nothing);
+        store(false, i, val, basic_nothing, basic_nothing);
 }
 
 bucket node::iter_find_node(hash_t target_id) {
@@ -407,16 +426,6 @@ fv_value node::iter_find_value(std::string key) {
     return lookup(true, key, util::sha1(key));
 }
 
-void node::refresh_prefix(hash_t prefix) {
-    tree* ptr = table->root;
-    assert(ptr != nullptr);
-
-    int i = 0;
-    table->traverse(true, prefix, &ptr, i);
-
-    refresh(ptr);
-}
-
 void node::refresh(tree* ptr) {
     if(ptr == nullptr) return;
     if(!ptr->leaf) return;
@@ -431,14 +440,6 @@ void node::refresh(tree* ptr) {
         ptr->data = bkt;
         spdlog::debug("refreshed bucket {}, sz: {}", ptr->prefix.prefix.to_string(), ptr->data.size());
     }
-}
-
-void node::refresh_tree() {
-    table->dfs([&, this](tree* ptr) {
-        auto time_since = TIME_NOW() - ptr->data.last_seen;
-        if(time_since > proto::refresh_time)
-            refresh(ptr);
-    });
 }
 
 /// @todo resolve to get our own IP?
