@@ -20,15 +20,15 @@ struct kv {
     kv(hash_t k, std::string v, peer o, u64 t) : key(k), value(v), origin(o), timestamp(t) { } 
 };
 
-using fv_value = boost::variant<boost::blank, kv, bucket>;
-
-// callback types
-using basic_callback = std::function<void(peer)>;
-using bucket_callback = std::function<void(peer, bucket)>;
-using find_value_callback = std::function<void(peer, fv_value)>;
-
 class node {
 public:
+    using fv_value = boost::variant<boost::blank, kv, bucket>;
+    using basic_callback = std::function<void(peer)>;
+    using bucket_callback = std::function<void(peer, bucket)>;
+    using find_value_callback = std::function<void(peer, fv_value)>;
+
+    basic_callback basic_nothing = [](peer) { };
+
     node(u16);
     ~node();
 
@@ -42,13 +42,18 @@ public:
     bucket iter_find_node(hash_t);
     fv_value iter_find_value(std::string);
     
+    std::list<fv_value> disjoint_lookup(bool, hash_t);
+
 private:
     using fut_t = std::tuple<peer, fv_value>;
-
-    basic_callback basic_nothing = [](peer) { };
     
-    std::future<fut_t> _find_wrapper(bool, peer, hash_t);
-    fv_value lookup(bool, std::string, hash_t);
+    struct djc {
+        std::mutex mutex;
+        std::list<peer> shortlist;
+    };
+    
+    std::future<fut_t> _lookup(bool, peer, hash_t);
+    fv_value lookup(bool, std::deque<peer>, boost::optional<std::shared_ptr<djc>>, hash_t);
 
     void refresh(tree*);
     void republish(kv);

@@ -147,7 +147,7 @@ void network::handle(std::string buf, udp::endpoint ep) {
 
     try {
         peer p(ep.address().to_string(), ep.port(), hash_t(util::to_bin(msg.i)));
-
+        
         // if there's already a response pending, drop this one
         if(msg.m == proto::type::query && queue.pending(p, msg.q))
             return;

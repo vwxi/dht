@@ -8,7 +8,7 @@ these are constants within the software that you will have to change if you wish
 as defined in `include/dht/util.hpp` and `include/dht/proto.h`:
 
 - hash width in u32s (`u32_hash_width`) (default: 5)
-- number of peer entries allowed in one bucket (`K`) (default: 4) (CHANGE!)
+- number of peer entries allowed in one bucket (`bucket_size`) (default: 20)
 - hash width in bits (`bit_hash_width`) (default: 160)
 - number of missed pings allowed (`missed_pings_allowed`) (default: 3) (CHANGE!)
 - number of missed messages allowed (`missed_messages_allowed`) (default: 3) (CHANGE!)
@@ -20,6 +20,7 @@ as defined in `include/dht/util.hpp` and `include/dht/proto.h`:
 - number of seconds until a key-value pair expires (`republish_time`) (default: 86400)
 - number of seconds between each routing table refresh (`refresh_interval`) (default: 600)
 - number of seconds between key-value republications (`refresh_interval`) (default: 86400)
+- number of disjoint paths to take for lookups (`disjoint_paths`) (default: 3)
 
 ## messages
 
@@ -349,4 +350,19 @@ TODO...
 
 ## operations
 
-joins, refreshes and republishes are all described in [xlattice/kademlia](https://xlattice.sourceforge.net/components/protocol/kademlia/specs.html)
+joins, refreshes and republishes are all described in [xlattice/kademlia](https://xlattice.sourceforge.net/components/protocol/kademlia/specs.html)  
+
+### disjoint path lookup
+
+from the S/kademlia paper,
+
+> We extended this algorithm to use d disjoint paths and thus increase the lookup success ratio in a network with adversarial nodes. The initiator starts a lookup by taking the k closest nodes to the destination key from his local routing table and distributes them into d independent lookup buckets. From there on the node continues with d parallel lookups similar to the traditional Kademlia lookup. The lookups are independent, except the important fact, that each node is only used once during the whole lookup process to ensure that the resulting paths are really disjoint.
+
+---
+
+the idea is N unique lookup paths, no interleaving nodes. the paper is pretty vague in regards to specifics but
+
+have a list of "claimed" peers
+1. start N lookups in parallel
+2. for every successfully contacted peer, add to claimed list. to ensure disjointness, this peer cannot be contacted again
+3. return N lookup results

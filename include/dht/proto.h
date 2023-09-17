@@ -12,7 +12,7 @@ struct peer {
     u16 port;
     int staleness;
 
-    peer() { }
+    peer() = default;
     peer(hash_t id_) : id(id_) { }
     peer(std::string a, u16 p, hash_t id_) : addr(a), port(p), staleness(0), id(id_) { }
     peer(std::string a, u16 p) : addr(a), port(p), staleness(0), id(0) { }

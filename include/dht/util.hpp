@@ -74,8 +74,8 @@ namespace proto {
 
 const int magic_length = 4; // magic length in bytes
 const int hash_width = 5; // hash width in unsigned ints
-const int bucket_size = 4;   // number of entries in k-buckets (SHOULD NOT BE OVER 20)
-const int bit_hash_width = 32; // hash width in bits
+const int bucket_size = 20; // number of entries in k-buckets (k=20)
+const int bit_hash_width = 160; // hash width in bits
 const int missed_pings_allowed = 3; // number of missed pings allowed
 const int missed_messages_allowed = 3; // number of missed messages allowed
 const int net_timeout = 10; // number of seconds until timeout
@@ -86,6 +86,7 @@ const int refresh_time = 3600; // number of seconds until a bucket needs refresh
 const int republish_time = 86400; // number of seconds until a key-value pair expires
 const int refresh_interval = 600; // when to refresh buckets older than refresh_time, in seconds
 const int republish_interval = 86400; // when to republish data older than an republish_time, in seconds
+const int disjoint_paths = 3; // number of disjoint paths to take for lookups
 
 }
 

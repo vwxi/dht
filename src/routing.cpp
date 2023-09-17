@@ -31,6 +31,7 @@ tree::~tree() {
     delete right; right = nullptr;
 }
 
+// routing table is a XOR-trie
 routing_table::routing_table(hash_t id_, network& net_) : id(id_), net(net_) { };
 routing_table::~routing_table() { delete root; root = nullptr; }
 
@@ -241,11 +242,8 @@ std::deque<peer> routing_table::find_alpha(peer req) {
     std::deque<peer> res;
 
     int n = 0;
-    for(const auto& e : ptr->data) {
-        if(n++ < proto::alpha)
-            res.push_back(e);
-        else break;
-    }
+    for(auto e = ptr->data.begin(); e != ptr->data.end() && n++ < proto::alpha; ++e)
+        res.push_back(*e);
 
     // try and get more contacts from sibling tree nodes if there aren't enough 
     if(res.size() < proto::alpha && ptr->parent != nullptr) {

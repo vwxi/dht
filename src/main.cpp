@@ -15,7 +15,7 @@ int main(int argc, char** argv) {
     case 2: // ping
         {
             node n(std::atoi(argv[2]));
-            n.ping(peer(std::string(argv[3]), std::atoi(argv[4])), [](peer) {}, [](peer){});
+            n.ping(peer(std::string(argv[3]), std::atoi(argv[4])), n.basic_nothing, n.basic_nothing);
         }
         break;
     case 3: // iterative find node
@@ -28,7 +28,7 @@ int main(int argc, char** argv) {
                     for(auto i : b)
                         spdlog::info("\t{}", i());
                 }, 
-                [](peer){});
+                n.basic_nothing);
         }
         break;
     case 4: // iterative store
@@ -36,9 +36,9 @@ int main(int argc, char** argv) {
             node n(std::atoi(argv[2]));
             n.ping(peer("127.0.0.1", 16161), 
                 [&](peer) {
-                    n.iter_store("heyyyyyyyyyyyyyyyyyyyyyyy", "hey there buster");
+                    n.iter_store("hihi", "hey there buster");
                 }, 
-                [](peer){});
+                n.basic_nothing);
         }
         break;
     case 5: // iterative find value
@@ -46,7 +46,7 @@ int main(int argc, char** argv) {
             node n(std::atoi(argv[2]));
             n.ping(peer(argv[3], std::atoi(argv[4])), 
                 [&](peer) {
-                    fv_value v = n.iter_find_value("heyyyyyyyyyyyyyyyyyyyyyyy");
+                    node::fv_value v = n.iter_find_value("hihi");
                     spdlog::info("iter_find_value ->");
                     if(v.type() == typeid(bucket)) {
                         spdlog::info("\tno value found, bucket instead:");
@@ -54,13 +54,35 @@ int main(int argc, char** argv) {
                             spdlog::info("\t\t{}", i());
                     } else {
                         kv vl = boost::get<kv>(v);
-                        spdlog::info("\tvalue found, value is: {}, timestamp is {}, origin is {}", vl.value, vl.timestamp, vl.origin());
+                        spdlog::info("\tvalue found, value is: {}, timestamp is {}, origin is {}", 
+                            vl.value, vl.timestamp, vl.origin());
                     }
                 }, 
-                [](peer){});
+                n.basic_nothing);
         }
         break;
-    case 6: // join
+    case 6: // disjoint path
+        {
+            node n(std::atoi(argv[2]));
+            n.join(peer(argv[3], std::atoi(argv[4])),
+                [&](peer) { 
+                    std::list<node::fv_value> paths = n.disjoint_lookup(true, util::sha1("hihi"));
+                    for(const auto& p : paths) {
+                        spdlog::info("disjoint path ->");
+                        if(p.type() == typeid(bucket)) {
+                            for(auto b : boost::get<bucket>(p))
+                                spdlog::info("\tbucket peer {}", b());
+                        } else if(p.type() == typeid(kv)) {
+                            kv v = boost::get<kv>(p);
+                            spdlog::info("\tkv {} val {} ts {} origin {}", 
+                                util::htos(v.key), v.value, v.timestamp, v.origin());
+                        }
+                    }
+                },
+                [&](peer) { spdlog::info("join was a failure."); });
+        }
+        break;
+    case 7: // join
         {
             node n(std::atoi(argv[2]));
             n.join(peer(argv[3], std::atoi(argv[4])),

@@ -43,8 +43,6 @@ int main() {
 
 ## list of stuff to do
 
-- resolve
-- disjoint path lookups
 - document everything
 - interface
 - tests

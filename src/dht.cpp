@@ -38,7 +38,7 @@ node::node(u16 port) :
     republish_thread = std::thread([&, this]() {
         while(true) {
             std::this_thread::sleep_for(seconds(proto::refresh_interval));
-            
+
             {
                 LOCK(ht_mutex);
                 for(const auto& entry : ht) {
@@ -305,10 +305,10 @@ void node::find_value(peer p, std::string key, find_value_callback ok, basic_cal
     find_value(p, util::sha1(key), ok, bad);
 }
 
-std::future<node::fut_t> node::_find_wrapper(bool fv, peer p, hash_t target_id) {
+std::future<node::fut_t> node::_lookup(bool fv, peer p, hash_t target_id) {
     std::shared_ptr<std::promise<fut_t>> prom = std::make_shared<std::promise<fut_t>>();
     std::future<fut_t> fut = prom->get_future();
-
+    
     if(fv) {
         find_value(p, target_id,
             [&, prom](peer p_, fv_value v) { prom->set_value(fut_t{std::move(p_), std::move(v)}); }, 
@@ -324,27 +324,59 @@ std::future<node::fut_t> node::_find_wrapper(bool fv, peer p, hash_t target_id) 
 
 // synchronous operation
 // see xlattice/kademlia lookup
-fv_value node::lookup(bool fv, std::string fv_key, hash_t target_id) {
+node::fv_value node::lookup(
+    bool fv,
+    std::deque<peer> shortlist, 
+    boost::optional<std::shared_ptr<node::djc>> claimed,
+    hash_t target_id) {
     std::list<peer> visited;
-    std::deque<peer> shortlist = table->find_alpha(peer(target_id));
     bucket res(table);
 
     peer closest_node = *std::min_element(shortlist.begin(), shortlist.end(), 
-        [target_id](peer a, peer b) { return (a.id ^ target_id) < (b.id ^ target_id); });
+        [target_id](peer a, peer b) { return (a.id ^ target_id) < (b.id ^ target_id); }),
+        candidate{};
+    bool first = true;
 
-    auto filter = [&, this](peer a) { return std::count(visited.begin(), visited.end(), a) != 0 || a.id == id; };
+    auto filter = [&, this](peer a) { 
+        return std::count(visited.begin(), visited.end(), a) != 0 || 
+            std::count(shortlist.begin(), shortlist.end(), a) != 0 || 
+            a.id == id; };
+    auto filter2 = [&, this](peer a) { return std::count(res.begin(), res.end(), a) != 0; };
+    auto sort = [&](peer a, peer b) { return (a.id ^ target_id) < (b.id ^ target_id); };
 
     while(!shortlist.empty()) {
         std::list<std::future<fut_t>> tasks;
 
         // send out alpha RPCs
         int n = 0;
-        for(peer contact : shortlist) {
-            if(n++ < proto::alpha) {
-                auto i = shortlist.front();
-                tasks.push_back(_find_wrapper(fv, shortlist.front(), target_id));
-                shortlist.pop_front();
-            } else break;
+        while(n++ < proto::alpha && !shortlist.empty()) {
+            // if claimed is not nothing, we assume we're doing a disjoint lookup
+            if(claimed.has_value()) {
+                LOCK(claimed.get()->mutex);
+                auto& f = shortlist.front();
+
+                if(std::count(
+                    claimed.get()->shortlist.begin(), 
+                    claimed.get()->shortlist.end(), 
+                    f) == 0) {
+                    // we add to claimed list
+                    if(claimed.has_value()) {
+                        claimed.get()->shortlist.push_back(f);
+                    }
+
+                    // add lookup
+                    tasks.push_back(_lookup(fv, f, target_id));
+                } else {
+                    // we exclude "claimed" peers from being used in more 
+                    // than one lookup to ensure disjointness
+                    if(n > 0)
+                        n--;
+                }
+            } else {
+                tasks.push_back(_lookup(fv, shortlist.front(), target_id));
+            }
+
+            shortlist.pop_front();
         }
 
         // get back replies
@@ -356,7 +388,7 @@ fv_value node::lookup(bool fv, std::string fv_key, hash_t target_id) {
             visited.push_back(p);
 
             // res is a list of all successfully contacted peers, shortlist is just a queue
-            if(v.type() != typeid(boost::none))
+            if(v.type() != typeid(boost::blank) && !filter2(p))
                 res.push_back(p);
 
             if(v.type() == typeid(bucket)) {
@@ -375,22 +407,64 @@ fv_value node::lookup(bool fv, std::string fv_key, hash_t target_id) {
             }
         }
 
-        peer candidate = *std::min_element(shortlist.begin(), shortlist.end(), 
-            [target_id](peer a, peer b) { return (a.id ^ target_id) < (b.id ^ target_id); });
+        // nobody responded
+        if(res.empty())
+            break;
+        
+        std::sort(shortlist.begin(), shortlist.end(), sort);
+        candidate = *std::min_element(res.begin(), res.end(), sort);
 
-        if((candidate.id ^ target_id) < (closest_node.id ^ target_id)) {
+        if((candidate.id ^ target_id) < (closest_node.id ^ target_id) || first) {
             closest_node = candidate;
+            first = false;
         } else break;
     }
 
+    // remove ourselves, sort by closest
     res.remove_if([this](peer a) { return a.id == id; });
-    res.sort([&](peer a, peer b) { return (a.id ^ target_id) < (b.id ^ target_id); });
+    res.sort(sort);
 
+    // truncate results
     if(res.size() > proto::bucket_size)
         res.resize(proto::bucket_size);
 
     return res;
 }
+
+std::list<node::fv_value> node::disjoint_lookup(bool fv, hash_t target_id) {
+    std::deque<peer> initial = table->find_alpha(peer(target_id));
+    std::shared_ptr<djc> claimed = std::make_shared<djc>();
+    std::list<fv_value> paths;
+    std::list<std::future<fv_value>> tasks;
+
+    int i = 0;
+
+    // we cant do anything
+    if(initial.size() < proto::disjoint_paths)
+        return paths;
+
+    int num_to_slice = initial.size() / proto::disjoint_paths;
+
+    while(i++ < proto::disjoint_paths) {
+        int n = 0;
+        std::deque<peer> shortlist;
+        
+        while(n++ < num_to_slice) {
+            shortlist.push_back(initial.front());
+            initial.pop_front();
+        }
+
+        tasks.push_back(std::async(std::launch::async, [&, this](std::deque<peer> shortlist) {
+            return lookup(fv, shortlist, claimed, target_id);
+        }, shortlist));
+    }
+
+    for(auto&& t : tasks)
+        paths.push_back(t.get());
+
+    return paths;
+}
+
 
 // this is for a new key-value pair
 void node::iter_store(std::string key, std::string value) {
@@ -412,7 +486,8 @@ void node::republish(kv val) {
 }
 
 bucket node::iter_find_node(hash_t target_id) {
-    fv_value v = lookup(false, std::string{}, target_id);
+    std::deque<peer> shortlist = table->find_alpha(peer(target_id));
+    fv_value v = lookup(false, shortlist, boost::none, target_id);
     bucket b(table);
     
     bucket& g = boost::get<bucket>(v);
@@ -422,8 +497,11 @@ bucket node::iter_find_node(hash_t target_id) {
     return b;
 }
 
-fv_value node::iter_find_value(std::string key) {
-    return lookup(true, key, util::sha1(key));
+/// @note xlattice says so ... others say get() will be iter_find_node then find_value 
+node::fv_value node::iter_find_value(std::string key) {
+    hash_t hash = util::sha1(key);
+    std::deque<peer> shortlist = table->find_alpha(peer(hash));
+    return lookup(true, shortlist, boost::none, hash);
 }
 
 void node::refresh(tree* ptr) {
@@ -442,7 +520,6 @@ void node::refresh(tree* ptr) {
     }
 }
 
-/// @todo resolve to get our own IP?
 void node::join(peer p_, basic_callback ok, basic_callback bad) {
     // add peer to routing table
     ping(p_, [&, this](peer p) {
