@@ -39,7 +39,7 @@ one message per client should be handled at any time. a client should not have m
         "s": <schema version>,
         "m": <message type>,
         "a": <action>,
-        "i": <serialized ID>,
+        "i": <hex-string>,
         "q": <message ID>,
         "d": {
                 <action-specific data>
@@ -50,7 +50,7 @@ one message per client should be handled at any time. a client should not have m
 peer objects are formatted like so:
 
 ```
-{ "a": <address>, "p": <port>, "i": <serialized ID> }
+{ "a": <address>, "p": <port>, "i": <hex-string> }
 ```
 
 #### schema version
@@ -72,11 +72,10 @@ there are four actions:
 - store (`0x01`)
 - find_node (`0x02`)
 - find_value (`0x03`)
-- resolve (`0x04`)
 
-#### serialized ID
+#### hex-string
 
-the serialized ID will be a hex-string, for example:
+for example:
 
 - `01234567abcdef`
 - `1b1b30aeb0df0ed0f0c0ba03548135`
@@ -149,7 +148,7 @@ for recipient,
 ```
 
 where:
-- the key (serialized ID)
+- the key (hex-string)
 - binary data (string)
 - origin (peer object or nil)
 - timestamp (64-bit integer timestamp)
@@ -205,7 +204,7 @@ for sender,
 }
 ```
 
-where the target ID is a serialized ID  
+where the target ID is a hex-string  
 
 for recipient, "buckets" are serialized into arrays where each element describes a peer, like so:
 
@@ -219,7 +218,7 @@ for recipient, "buckets" are serialized into arrays where each element describes
 }
 ```
 
-where IP addresses are strings, ports are integers and IDs are serialized IDs
+where IP addresses are strings, ports are integers and IDs are hex-strings
 
 if there are no nearby nodes, the bucket may be empty
 
@@ -270,7 +269,7 @@ for sender,
 }
 ```
 
-where the target ID is a serialized ID
+where the target ID is a hex-string
 
 for recipient,
 
@@ -343,10 +342,6 @@ where:
                 ]
         }
 ```
-
-### resolve (`0x04`)
-
-TODO...
 
 ## operations
 
