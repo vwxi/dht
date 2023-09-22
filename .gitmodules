@@ -1,7 +1,8 @@
 [submodule "extern/spdlog"]
 	path = extern/spdlog
 	url = http://github.com/gabime/spdlog.git
-	
+
 [submodule "extern/msgpack-c"]
 	path = extern/msgpack-c
 	url = https://github.com/msgpack/msgpack-c.git
+	branch = cpp_master

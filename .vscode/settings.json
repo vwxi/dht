@@ -74,5 +74,6 @@
         "ranges": "cpp",
         "span": "cpp",
         "stop_token": "cpp"
-    }
+    },
+    "cmake.configureOnOpen": true
 }
