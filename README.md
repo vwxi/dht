@@ -40,6 +40,7 @@ int main() {
 - [boost](http://boost.org)
 - [gabime/spdlog](http://github.com/gabime/spdlog)
 - [msgpack/msgpack-c](http://github.com/msgpack/msgpack-c)
+- [cryptopp-cmake](https://github.com/abdes/cryptopp-cmake)
 
 ## list of stuff to do
 

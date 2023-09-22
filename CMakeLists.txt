@@ -51,6 +51,7 @@ endif()
 
 add_subdirectory(extern/spdlog)
 add_subdirectory(extern/msgpack-c)
+add_subdirectory(extern/cryptopp)
 
 add_executable(
 	dht
@@ -68,4 +69,4 @@ target_include_directories(
 	"${PROJECT_SOURCE_DIR}/extern"
 )
 
-target_link_libraries(dht PUBLIC Boost::system Boost::thread spdlog::spdlog pthread msgpack-cxx)
+target_link_libraries(dht PUBLIC Boost::system Boost::thread spdlog::spdlog pthread msgpack-cxx cryptopp)

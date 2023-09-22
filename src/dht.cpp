@@ -522,7 +522,7 @@ void node::refresh(tree* ptr) {
 
 void node::join(peer p_, basic_callback ok, basic_callback bad) {
     // add peer to routing table
-    ping(p_, [&, this](peer p) {
+    ping(p_, [this, ok](peer p) {
         // lookup our own id
         bucket bkt = iter_find_node(id);
 
