@@ -480,6 +480,7 @@ void node::iter_store(std::string key, std::string value) {
 // this is for republishing
 void node::republish(kv val) {
     bucket b = iter_find_node(val.key);
+    val.timestamp = TIME_NOW();
 
     for(auto i : b)
         store(false, i, val, basic_nothing, basic_nothing);
