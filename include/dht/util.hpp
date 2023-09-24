@@ -159,6 +159,8 @@ static unsigned int crc32b(unsigned char *message) {
 
 static hash_t hash(std::string s) {
     std::stringstream ss;
+    ss << "0x";
+
     CryptoPP::HexEncoder he(new CryptoPP::FileSink(ss));
 
     std::string digest;
@@ -170,8 +172,7 @@ static hash_t hash(std::string s) {
 
     (void)CryptoPP::StringSource(digest, true, new CryptoPP::Redirector(he));
 
-    spdlog::info("hh: {}", ss.str());
-    return hash_t(0);
+    return hash_t(ss.str());
 }
 
 }
