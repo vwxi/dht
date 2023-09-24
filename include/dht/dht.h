@@ -80,7 +80,7 @@ private:
     std::unordered_map<hash_t, kv> ht;
 
     std::random_device rd;
-    std::default_random_engine reng;
+    hash_reng_t reng;
 
     std::thread refresh_thread;
     std::thread republish_thread;

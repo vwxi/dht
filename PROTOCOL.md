@@ -9,7 +9,7 @@ as defined in `include/dht/util.hpp` and `include/dht/proto.h`:
 
 - hash width in u32s (`u32_hash_width`) (default: 5)
 - number of peer entries allowed in one bucket (`bucket_size`) (default: 20)
-- hash width in bits (`bit_hash_width`) (default: 160)
+- hash width in bits (`bit_hash_width`) (default: 256)
 - number of missed pings allowed (`missed_pings_allowed`) (default: 3) (CHANGE!)
 - number of missed messages allowed (`missed_messages_allowed`) (default: 3) (CHANGE!)
 - number of seconds until timeout (`net_timeout`) (default: 10) (CHANGE!)
@@ -21,6 +21,7 @@ as defined in `include/dht/util.hpp` and `include/dht/proto.h`:
 - number of seconds between each routing table refresh (`refresh_interval`) (default: 600)
 - number of seconds between key-value republications (`refresh_interval`) (default: 86400)
 - number of disjoint paths to take for lookups (`disjoint_paths`) (default: 3)
+- size of public/private keys in bytes (`key_size`) (default: 2048)
 
 ## messages
 
@@ -77,8 +78,8 @@ there are four actions:
 
 for example:
 
-- `01234567abcdef`
-- `1b1b30aeb0df0ed0f0c0ba03548135`
+- `0x01234567abcdef`
+- `0x1b1b30aeb0df0ed0f0c0ba03548135`
 
 #### message ID
 
@@ -105,7 +106,7 @@ there is no extra data to be sent from both parties
         "s": 0,
         "m": 0,
         "a": 0,
-        "i": "0b00b1e5",
+        "i": "0x0b00b1e5",
         "q": 103581305802345,
         "d": nil
 }
@@ -117,7 +118,7 @@ there is no extra data to be sent from both parties
         "s": 0,
         "m": 1,
         "a": 0,
-        "i": "177ff13e",
+        "i": "0x177ff13e",
         "q": 103581305802345,
         "d": nil
 }
@@ -165,12 +166,12 @@ if the origin is nil, then the sender is the origin of the key-value pair
         "s": 0,
         "m": 0,
         "a": 1,
-        "i": "0b00b1e5",
+        "i": "0x0b00b1e5",
         "q": 103581305802345,
         "d": {
-                "k": "abb12e35",
+                "k": "0xabb12e35",
                 "v": a3 e5 1d 0f 9e ... 6e 77 3a 0e 9f,
-                "o": { "a": "127.0.0.1", "p": 10001, "i": "00a0a001" }
+                "o": { "a": "127.0.0.1", "p": 10001, "i": "0x00a0a001" }
         }
 }
 ```
@@ -181,7 +182,7 @@ if the origin is nil, then the sender is the origin of the key-value pair
         "s": 0,
         "m": 0,
         "a": 1,
-        "i": "177ff13e",
+        "i": "0x177ff13e",
         "q": 103581305802345,
         "d": {
                 "t": 15019835313561,
@@ -230,10 +231,10 @@ if there are no nearby nodes, the bucket may be empty
         "s": 0,
         "m": 0,
         "a": 2,
-        "i": "0b00b1e5",
+        "i": "0x0b00b1e5",
         "q": 103581305802345,
         "d": {
-                "t": "19aebc67"
+                "t": "0x19aebc67"
         }
 ```
 
@@ -244,12 +245,12 @@ if there are no nearby nodes, the bucket may be empty
         "s": 0,
         "m": 1,
         "a": 2,
-        "i": "177ff13e",
+        "i": "0x177ff13e",
         "q": 103581305802345,
         "d": {
                 "b": [
-                        {"a": "24.30.210.11", "p": 16616, "i": "00e0fb37" }, 
-                        {"a": "1.1.51.103", "p": 10510, "i": "ab0de4c2" }
+                        {"a": "24.30.210.11", "p": 16616, "i": "0x00e0fb37" }, 
+                        {"a": "1.1.51.103", "p": 10510, "i": "0xab0de4c2" }
                 ]
         }
 }
@@ -301,10 +302,10 @@ where:
         "s": 0,
         "m": 0,
         "a": 3,
-        "i": "0b00b1e5",
+        "i": "0x0b00b1e5",
         "q": 103581305802345,
         "d": {
-                "t": "19aebc67"
+                "t": "0x19aebc67"
         }
 ```
 
@@ -314,13 +315,13 @@ where:
         "s": 0,
         "m": 1,
         "a": 3,
-        "i": "177ff13e",
+        "i": "0x177ff13e",
         "q": 103581305802345,
         "d": {
                 "v": {
                         "v": 1e e5 6a 2e 90 ... a0 e4 b7 61 d8,
-                        "o": {"a": "127.0.0.1", "p": 16006, "i": "1ab301d1"},
-                        "t": 196182340981z
+                        "o": {"a": "127.0.0.1", "p": 16006, "i": "0x1ab301d1"},
+                        "t": 196182340981
                 },
                 "b": nil
         }
@@ -332,13 +333,13 @@ where:
         "s": 0,
         "m": 1,
         "a": 3,
-        "i": "177ff13e",
+        "i": "0x177ff13e",
         "q": 103581305802345,
         "d": {
                 "v": nil,
                 "b": [
-                        {"a": "24.30.210.11", "p": 16616, "i": "00e0fb37" }, 
-                        {"a": "1.1.51.103", "p": 10510, "i": "ab0de4c2" }       
+                        {"a": "24.30.210.11", "p": 16616, "i": "0x00e0fb37" }, 
+                        {"a": "1.1.51.103", "p": 10510, "i": "0xab0de4c2" }       
                 ]
         }
 ```

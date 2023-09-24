@@ -1,6 +1,9 @@
 #ifndef _UTIL_HPP
 #define _UTIL_HPP
 
+#include "files.h"
+#include "filters.h"
+#include "hex.h"
 #include <iostream>
 #include <iomanip>
 #include <stdexcept>
@@ -29,15 +32,20 @@
 #define BOOST_BIND_NO_PLACEHOLDERS
 
 #include <boost/asio.hpp>
-#include <boost/uuid/detail/sha1.hpp>
 #include <boost/optional.hpp>
 #include <boost/variant.hpp>
 #include <boost/thread/shared_mutex.hpp>
 #include <boost/thread/shared_lock_guard.hpp>
 
+#include <boost/multiprecision/cpp_int.hpp>
+#include <boost/random.hpp>
+
 #include <msgpack.hpp>
 
 #include "spdlog/spdlog.h"
+
+#include <cryptopp/rsa.h>
+#include <cryptopp/sha.h>
 
 #define LOCK(m) std::lock_guard<std::mutex> l(m);
 #define R_LOCK(m) boost::shared_lock<boost::shared_mutex> l(m);
@@ -53,29 +61,18 @@ typedef std::uint8_t u8;
 
 using boost::asio::ip::udp;
 using boost::asio::ip::tcp;
-using boost::uuids::detail::sha1;
 using boost::asio::deadline_timer;
 using namespace std::chrono;
 using namespace std::placeholders;
 using rand_eng = std::uniform_int_distribution<u32>;
-
-template<std::size_t N>
-bool operator<(const std::bitset<N>& x, const std::bitset<N>& y)
-{
-    for (int i = N-1; i >= 0; i--) {
-        if (x[i] ^ y[i]) return y[i];
-    }
-    return false;
-}
 
 namespace dht {
 
 namespace proto {
 
 const int magic_length = 4; // magic length in bytes
-const int hash_width = 5; // hash width in unsigned ints
 const int bucket_size = 20; // number of entries in k-buckets (k=20)
-const int bit_hash_width = 160; // hash width in bits
+const int bit_hash_width = 256; // hash width in bits
 const int missed_pings_allowed = 3; // number of missed pings allowed
 const int missed_messages_allowed = 3; // number of missed messages allowed
 const int net_timeout = 10; // number of seconds until timeout
@@ -87,26 +84,28 @@ const int republish_time = 86400; // number of seconds until a key-value pair ex
 const int refresh_interval = 600; // when to refresh buckets older than refresh_time, in seconds
 const int republish_interval = 86400; // when to republish data older than an republish_time, in seconds
 const int disjoint_paths = 3; // number of disjoint paths to take for lookups
+const int key_size = 2048; // size of public/private keys in bytes
 
 }
 
-typedef std::bitset<proto::bit_hash_width> hash_t;
+typedef boost::multiprecision::number<
+    boost::multiprecision::cpp_int_backend<
+        proto::bit_hash_width, 
+        proto::bit_hash_width, 
+        boost::multiprecision::unsigned_magnitude, 
+        boost::multiprecision::unchecked, 
+        void>, 
+    boost::multiprecision::et_off> hash_t;
 
-typedef u32 id_t[proto::hash_width];
+typedef boost::random::independent_bits_engine<
+    boost::mt19937, 
+    proto::bit_hash_width, 
+    hash_t> hash_reng_t;
 
 namespace util { // utilities
 
 static u64 time_now() {
     return duration_cast<seconds>(system_clock::now().time_since_epoch()).count();
-}
-
-inline void hash_combine(std::size_t& seed) { }
-
-template <typename T, typename... Rest>
-inline void hash_combine(std::size_t& seed, const T& v, Rest... rest) {
-    std::hash<T> hasher;
-    seed ^= hasher(v) + 0x9e3779b9 + (seed<<6) + (seed>>2);
-    hash_combine(seed, rest...);
 }
 
 template<typename ... Args>
@@ -121,51 +120,11 @@ static std::string string_format( const std::string& format, Args ... args )
 }
 
 static std::string htos(hash_t h) {
-    std::vector<unsigned char> bytes((h.size() + 7) / 8);
-    for (size_t i = 0; i < h.size(); ++i) {
-        if (h.test(i)) {
-            bytes[i / 8] |= 1 << (i % 8);
-        }
-    }
-
     std::stringstream ss;
     ss << std::hex;
-
-    for (auto b = bytes.rbegin(); b != bytes.rend(); ++b) {
-        ss << std::setw(2) << std::setfill('0') << static_cast<int>(*b);
-    }
-
+    ss << "0x";
+    ss << h;
     return ss.str();
-}
-
-static hash_t htob(id_t h) {
-    hash_t b(0), t(0);
-    const u64 sh = sizeof(unsigned int) << 3;
-    
-    b |= hash_t(h[4]); b <<= sh;
-    b |= hash_t(h[3]); b <<= sh;
-    b |= hash_t(h[2]); b <<= sh;
-    b |= hash_t(h[1]); b <<= sh;
-    b |= hash_t(h[0]);
-
-    return b;
-}
-
-static void btoh(hash_t b, id_t& h) {
-    const u64 sh = 32;
-    hash_t s(0xffffffff);
-
-    h[0] = (b & s).to_ulong(); b >>= sh;
-    h[1] = (b & s).to_ulong(); b >>= sh;
-    h[2] = (b & s).to_ulong(); b >>= sh;
-    h[3] = (b & s).to_ulong(); b >>= sh;
-    h[4] = (b & s).to_ulong(); b >>= sh;
-}
-
-static void msg_id(std::default_random_engine& reng, id_t& h) {
-    std::uniform_int_distribution<unsigned int> uid;
-
-    std::generate(std::begin(h), std::end(h), [&]() { return uid(reng); });
 }
 
 static u64 msg_id() {
@@ -175,27 +134,8 @@ static u64 msg_id() {
     return r;
 }
 
-static hash_t gen_id(std::default_random_engine& reng) {
-    id_t id;
-    msg_id(reng, id);
-    return htob(id);
-}
-
-static std::string to_bin(std::string hex) {
-    const std::unordered_map<char, std::string> t = {
-        { '0', "0000" }, { '1', "0001" }, { '2', "0010" }, { '3', "0011" }, 
-        { '4', "0100" }, { '5', "0101" }, { '6', "0110" }, { '7', "0111" }, 
-        { '8', "1000" }, { '9', "1001" }, { 'A', "1010" }, { 'B', "1011" }, 
-        { 'C', "1100" }, { 'D', "1101" }, { 'E', "1110" }, { 'F', "1111" }
-    };
-
-    std::string r;
-    for(auto i : hex)
-        try {
-            r += t.at(std::toupper(i));
-        } catch (std::exception&) { throw std::invalid_argument("to_bin: bad hex string"); }
-
-    return r;
+static hash_t gen_id(hash_reng_t& reng) {
+    return reng();
 }
 
 // http://www.hackersdelight.org/hdcodetxt/crc.c.txt
@@ -217,18 +157,21 @@ static unsigned int crc32b(unsigned char *message) {
    return ~crc;
 }
 
-static hash_t sha1(std::string s) {
-    boost::uuids::detail::sha1 sha1;
-    id_t h;
-    sha1.process_bytes(s.c_str(), s.size());
-    sha1.get_digest(h);
-    return util::htob(h);
-}
+static hash_t hash(std::string s) {
+    std::stringstream ss;
+    CryptoPP::HexEncoder he(new CryptoPP::FileSink(ss));
 
-template <typename M, typename F, typename... Args>
-static auto lock_fn(M& mut, F&& fn, Args&&... args) {
-    LOCK(mut);
-    return std::forward<F>(fn)(std::forward<Args>(args)...);
+    std::string digest;
+    CryptoPP::SHA256 h;
+
+    h.Update((const CryptoPP::byte*)s.data(), s.size());
+    digest.resize(h.DigestSize() + 2); // hacky
+    h.Final((CryptoPP::byte*)&digest[2]);
+
+    (void)CryptoPP::StringSource(digest, true, new CryptoPP::Redirector(he));
+
+    spdlog::info("hh: {}", ss.str());
+    return hash_t(0);
 }
 
 }

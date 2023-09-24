@@ -50,7 +50,7 @@ struct peer_object {
     peer_object() { }
     peer_object(std::string a_, int p_, std::string i_) : a(a_), p(p_), i(i_) { }
     peer_object(peer p_) : a(p_.addr), p(p_.port), i(util::htos(p_.id)) { }
-    peer to_peer() const { return peer(a, p, hash_t(util::to_bin(i))); }
+    peer to_peer() const { return peer(a, p, hash_t(i)); }
 };
 
 struct stored_data {

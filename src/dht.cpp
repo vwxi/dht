@@ -75,7 +75,7 @@ void node::handle_store(peer p, proto::message msg) {
         proto::store_query_data d;
         msg.d.convert(d);
 
-        hash_t k(util::to_bin(d.k));
+        hash_t k(d.k);
         u32 chksum = util::crc32b((u8*)d.v.data());
 
         int s = proto::status::ok;
@@ -113,7 +113,7 @@ void node::handle_find_node(peer p, proto::message msg) {
         proto::find_query_data d;
         msg.d.convert(d);
 
-        hash_t target_id(util::to_bin(d.t));
+        hash_t target_id(d.t);
         bucket bkt = table->find_bucket(peer(target_id));
 
         std::vector<proto::peer_object> b;
@@ -153,7 +153,7 @@ void node::handle_find_value(peer p, proto::message msg) {
         proto::find_query_data d;
         msg.d.convert(d);
 
-        hash_t target_id(util::to_bin(d.t));
+        hash_t target_id(d.t);
 
         {
             LOCK(ht_mutex);
@@ -261,7 +261,7 @@ void node::find_node(peer p, hash_t target_id, bucket_callback ok, basic_callbac
             bucket bkt(table);
 
             for(auto i : b.b)
-                bkt.push_back(peer(i.a, i.p, hash_t(util::to_bin(i.i))));
+                bkt.push_back(peer(i.a, i.p, hash_t(i.i)));
 
             ok(p_, std::move(bkt));
         },
@@ -288,7 +288,7 @@ void node::find_value(peer p, hash_t target_id, find_value_callback ok, basic_ca
                     bucket bkt(table);
 
                     for(auto i : d.b.value())
-                        bkt.push_back(peer(i.a, i.p, hash_t(util::to_bin(i.i))));
+                        bkt.push_back(peer(i.a, i.p, hash_t(i.i)));
 
                     ok(p_, std::move(bkt));
                 }
@@ -302,7 +302,7 @@ void node::find_value(peer p, hash_t target_id, find_value_callback ok, basic_ca
 }
 
 void node::find_value(peer p, std::string key, find_value_callback ok, basic_callback bad) {
-    find_value(p, util::sha1(key), ok, bad);
+    find_value(p, util::hash(key), ok, bad);
 }
 
 std::future<node::fut_t> node::_lookup(bool fv, peer p, hash_t target_id) {
@@ -468,7 +468,7 @@ std::list<node::fv_value> node::disjoint_lookup(bool fv, hash_t target_id) {
 
 // this is for a new key-value pair
 void node::iter_store(std::string key, std::string value) {
-    hash_t hash = util::sha1(key);
+    hash_t hash = util::hash(key);
     bucket b = iter_find_node(hash);
     // ignores the peer object anyways
     kv vl(hash, value, peer(), util::time_now());
@@ -500,7 +500,7 @@ bucket node::iter_find_node(hash_t target_id) {
 
 /// @note xlattice says so ... others say get() will be iter_find_node then find_value 
 node::fv_value node::iter_find_value(std::string key) {
-    hash_t hash = util::sha1(key);
+    hash_t hash = util::hash(key);
     std::deque<peer> shortlist = table->find_alpha(peer(hash));
     return lookup(true, shortlist, boost::none, hash);
 }
@@ -517,7 +517,7 @@ void node::refresh(tree* ptr) {
     if(!bkt.empty()) {
         W_LOCK(table->mutex);
         ptr->data = bkt;
-        spdlog::debug("refreshed bucket {}, sz: {}", ptr->prefix.prefix.to_string(), ptr->data.size());
+        spdlog::debug("refreshed bucket {}, sz: {}", util::htos(ptr->prefix.prefix), ptr->data.size());
     }
 }
 
