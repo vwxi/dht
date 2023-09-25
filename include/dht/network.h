@@ -57,7 +57,7 @@ public:
         msg.s = proto::schema_version; // s: schema
         msg.m = m; // m: message type
         msg.a = a; // a: action
-        msg.i = util::htos(i); // i: serialized ID
+        msg.i = util::b58encode_h(i); // i: serialized ID
         msg.q = q; // q: message ID
         msg.d = msgpack::object(d, z); // d: action-specific data
         

@@ -75,7 +75,7 @@ int main(int argc, char** argv) {
                         } else if(p.type() == typeid(kv)) {
                             kv v = boost::get<kv>(p);
                             spdlog::info("\tkv {} val {} ts {} origin {}", 
-                                util::htos(v.key), v.value, v.timestamp, v.origin());
+                                util::b58encode_h(v.key), v.value, v.timestamp, v.origin());
                         }
                     }
                 },
@@ -88,6 +88,14 @@ int main(int argc, char** argv) {
             n.join(peer(argv[3], std::atoi(argv[4])),
                 [&](peer) { spdlog::info("join was a success."); },
                 [&](peer) { spdlog::info("join was a failure."); });
+        }
+        break;
+    case 8: // testing base58
+        {
+            spdlog::info("base58('hello') = {}", util::b58encode_s("hello"));
+            spdlog::info("base58d('Cn8eVZg') = {}", util::b58decode_s("Cn8eVZg"));
+            spdlog::info("base58h(0xb00b1e5) = {}", util::b58encode_h(0xb00b1e5));
+            spdlog::info("base58hd('HK6dz') = {}", util::b58encode_h(util::b58decode_h("HK6dz")));
         }
         break;
     }

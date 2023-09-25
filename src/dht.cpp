@@ -20,7 +20,7 @@ node::node(u16 port) :
     table_ref = table;
     table->init();
 
-    spdlog::debug("running DHT node on port {} (id: {})", port, util::htos(id));
+    spdlog::debug("running DHT node on port {} (id: {})", port, util::b58encode_h(id));
 
     net.run();
     
@@ -75,7 +75,7 @@ void node::handle_store(peer p, proto::message msg) {
         proto::store_query_data d;
         msg.d.convert(d);
 
-        hash_t k(d.k);
+        hash_t k(util::b58decode_h(d.k));
         u32 chksum = util::crc32b((u8*)d.v.data());
 
         int s = proto::status::ok;
@@ -113,12 +113,12 @@ void node::handle_find_node(peer p, proto::message msg) {
         proto::find_query_data d;
         msg.d.convert(d);
 
-        hash_t target_id(d.t);
+        hash_t target_id(util::b58decode_h(d.t));
         bucket bkt = table->find_bucket(peer(target_id));
 
         std::vector<proto::peer_object> b;
         for(auto i : bkt)
-            b.push_back(proto::peer_object(i.addr, i.port, util::htos(i.id)));
+            b.push_back(proto::peer_object(i.addr, i.port, util::b58encode_h(i.id)));
 
         net.send(false,
             p, proto::type::response, proto::actions::find_node,
@@ -153,7 +153,7 @@ void node::handle_find_value(peer p, proto::message msg) {
         proto::find_query_data d;
         msg.d.convert(d);
 
-        hash_t target_id(d.t);
+        hash_t target_id(util::b58decode_h(d.t));
 
         {
             LOCK(ht_mutex);
@@ -174,7 +174,7 @@ void node::handle_find_value(peer p, proto::message msg) {
 
                 std::vector<proto::peer_object> b;
                 for(auto i : bkt)
-                    b.push_back(proto::peer_object{i.addr, i.port, util::htos(i.id)});
+                    b.push_back(proto::peer_object{i.addr, i.port, util::b58encode_h(i.id)});
 
                 net.send(false,
                     p, proto::type::response, proto::actions::find_value,
@@ -228,7 +228,7 @@ void node::store(bool origin, peer p, kv val, basic_callback ok, basic_callback 
 
     net.send(true,
         p, proto::type::query, proto::actions::store,
-        id, util::msg_id(), proto::store_query_data{ .k = util::htos(val.key), .v = val.value, .o = po },
+        id, util::msg_id(), proto::store_query_data{ .k = util::b58encode_h(val.key), .v = val.value, .o = po },
         [this, ok, bad, chksum](peer p_, std::string s) { 
             u32 csum;
             std::stringstream ss;
@@ -250,7 +250,7 @@ void node::store(bool origin, peer p, kv val, basic_callback ok, basic_callback 
 void node::find_node(peer p, hash_t target_id, bucket_callback ok, basic_callback bad) {
     net.send(true,
         p, proto::type::query, proto::actions::find_node,
-        id, util::msg_id(), proto::find_query_data { .t = util::htos(target_id) },
+        id, util::msg_id(), proto::find_query_data { .t = util::b58encode_h(target_id) },
         [this, ok, bad](peer p_, std::string s) {
             msgpack::object_handle oh;
             msgpack::unpack(oh, s.data(), s.size());
@@ -261,7 +261,7 @@ void node::find_node(peer p, hash_t target_id, bucket_callback ok, basic_callbac
             bucket bkt(table);
 
             for(auto i : b.b)
-                bkt.push_back(peer(i.a, i.p, hash_t(i.i)));
+                bkt.push_back(peer(i.a, i.p, util::b58decode_h(i.i)));
 
             ok(p_, std::move(bkt));
         },
@@ -273,7 +273,7 @@ void node::find_node(peer p, hash_t target_id, bucket_callback ok, basic_callbac
 void node::find_value(peer p, hash_t target_id, find_value_callback ok, basic_callback bad) {
     net.send(true,
         p, proto::type::query, proto::actions::find_value,
-        id, util::msg_id(), proto::find_query_data { .t = util::htos(target_id) },
+        id, util::msg_id(), proto::find_query_data { .t = util::b58encode_h(target_id) },
         [this, ok, bad, target_id](peer p_, std::string s) {
             msgpack::object_handle oh;
             msgpack::unpack(oh, s.data(), s.size());
@@ -288,7 +288,7 @@ void node::find_value(peer p, hash_t target_id, find_value_callback ok, basic_ca
                     bucket bkt(table);
 
                     for(auto i : d.b.value())
-                        bkt.push_back(peer(i.a, i.p, hash_t(i.i)));
+                        bkt.push_back(peer(i.a, i.p, util::b58decode_h(i.i)));
 
                     ok(p_, std::move(bkt));
                 }

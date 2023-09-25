@@ -40,7 +40,7 @@ one message per client should be handled at any time. a client should not have m
         "s": <schema version>,
         "m": <message type>,
         "a": <action>,
-        "i": <hex-string>,
+        "i": <enc-string>,
         "q": <message ID>,
         "d": {
                 <action-specific data>
@@ -51,7 +51,7 @@ one message per client should be handled at any time. a client should not have m
 peer objects are formatted like so:
 
 ```
-{ "a": <address>, "p": <port>, "i": <hex-string> }
+{ "a": <address>, "p": <port>, "i": <enc-string> }
 ```
 
 #### schema version
@@ -74,12 +74,28 @@ there are four actions:
 - find_node (`0x02`)
 - find_value (`0x03`)
 
-#### hex-string
+#### enc-string
 
-for example:
+enc-strings are base58-encoded strings
 
-- `0x01234567abcdef`
-- `0x1b1b30aeb0df0ed0f0c0ba03548135`
+this protocol uses this alphabet:
+
+```cpp
+static const char b58map[] = {
+  '1', '2', '3', '4', '5', '6', '7', '8',
+  '9', 'A', 'B', 'C', 'D', 'E', 'F', 'G',
+  'H', 'J', 'K', 'L', 'M', 'N', 'P', 'Q',
+  'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y',
+  'Z', 'a', 'b', 'c', 'd', 'e', 'f', 'g',
+  'h', 'i', 'j', 'k', 'm', 'n', 'o', 'p',
+  'q', 'r', 's', 't', 'u', 'v', 'w', 'x',
+  'y', 'z' };
+```
+
+examples (base58 -> hex):
+
+- `HK6dz` -> `0xb00b1e5`
+- `4vygUjcYGbG` -> `0x177ff13e0a8ef567`
 
 #### message ID
 
@@ -106,7 +122,7 @@ there is no extra data to be sent from both parties
         "s": 0,
         "m": 0,
         "a": 0,
-        "i": "0x0b00b1e5",
+        "i": "HK6dz",
         "q": 103581305802345,
         "d": nil
 }
@@ -118,7 +134,7 @@ there is no extra data to be sent from both parties
         "s": 0,
         "m": 1,
         "a": 0,
-        "i": "0x177ff13e",
+        "i": "bqgzy",
         "q": 103581305802345,
         "d": nil
 }
@@ -149,7 +165,7 @@ for recipient,
 ```
 
 where:
-- the key (hex-string)
+- the key (enc-string)
 - binary data (string)
 - origin (peer object or nil)
 - timestamp (64-bit integer timestamp)
@@ -166,12 +182,12 @@ if the origin is nil, then the sender is the origin of the key-value pair
         "s": 0,
         "m": 0,
         "a": 1,
-        "i": "0x0b00b1e5",
+        "i": "HK6dz",
         "q": 103581305802345,
         "d": {
-                "k": "0xabb12e35",
+                "k": "5PYPwi",
                 "v": a3 e5 1d 0f 9e ... 6e 77 3a 0e 9f,
-                "o": { "a": "127.0.0.1", "p": 10001, "i": "0x00a0a001" }
+                "o": { "a": "127.0.0.1", "p": 10001, "i": "1vxEC" }
         }
 }
 ```
@@ -182,7 +198,7 @@ if the origin is nil, then the sender is the origin of the key-value pair
         "s": 0,
         "m": 0,
         "a": 1,
-        "i": "0x177ff13e",
+        "i": "bqgzy",
         "q": 103581305802345,
         "d": {
                 "t": 15019835313561,
@@ -205,7 +221,7 @@ for sender,
 }
 ```
 
-where the target ID is a hex-string  
+where the target ID is a enc-string  
 
 for recipient, "buckets" are serialized into arrays where each element describes a peer, like so:
 
@@ -219,7 +235,7 @@ for recipient, "buckets" are serialized into arrays where each element describes
 }
 ```
 
-where IP addresses are strings, ports are integers and IDs are hex-strings
+where IP addresses are strings, ports are integers and IDs are enc-strings
 
 if there are no nearby nodes, the bucket may be empty
 
@@ -231,10 +247,10 @@ if there are no nearby nodes, the bucket may be empty
         "s": 0,
         "m": 0,
         "a": 2,
-        "i": "0x0b00b1e5",
+        "i": "HK6dz",
         "q": 103581305802345,
         "d": {
-                "t": "0x19aebc67"
+                "t": "f5PBC"
         }
 ```
 
@@ -245,12 +261,12 @@ if there are no nearby nodes, the bucket may be empty
         "s": 0,
         "m": 1,
         "a": 2,
-        "i": "0x177ff13e",
+        "i": "bqgzy",
         "q": 103581305802345,
         "d": {
                 "b": [
-                        {"a": "24.30.210.11", "p": 16616, "i": "0x00e0fb37" }, 
-                        {"a": "1.1.51.103", "p": 10510, "i": "0xab0de4c2" }
+                        {"a": "24.30.210.11", "p": 16616, "i": "12JZzN" }, 
+                        {"a": "1.1.51.103", "p": 10510, "i": "5NbYrm" }
                 ]
         }
 }
@@ -270,7 +286,7 @@ for sender,
 }
 ```
 
-where the target ID is a hex-string
+where the target ID is a enc-string
 
 for recipient,
 
@@ -302,10 +318,10 @@ where:
         "s": 0,
         "m": 0,
         "a": 3,
-        "i": "0x0b00b1e5",
+        "i": "HK6dz",
         "q": 103581305802345,
         "d": {
-                "t": "0x19aebc67"
+                "t": "f5PBC"
         }
 ```
 
@@ -315,12 +331,12 @@ where:
         "s": 0,
         "m": 1,
         "a": 3,
-        "i": "0x177ff13e",
+        "i": "bqgzy",
         "q": 103581305802345,
         "d": {
                 "v": {
                         "v": 1e e5 6a 2e 90 ... a0 e4 b7 61 d8,
-                        "o": {"a": "127.0.0.1", "p": 16006, "i": "0x1ab301d1"},
+                        "o": {"a": "127.0.0.1", "p": 16006, "i": "gaofe"},
                         "t": 196182340981
                 },
                 "b": nil
@@ -333,13 +349,13 @@ where:
         "s": 0,
         "m": 1,
         "a": 3,
-        "i": "0x177ff13e",
+        "i": "bqgzy",
         "q": 103581305802345,
         "d": {
                 "v": nil,
                 "b": [
-                        {"a": "24.30.210.11", "p": 16616, "i": "0x00e0fb37" }, 
-                        {"a": "1.1.51.103", "p": 10510, "i": "0xab0de4c2" }       
+                        {"a": "24.30.210.11", "p": 16616, "i": "12JZzN" }, 
+                        {"a": "1.1.51.103", "p": 10510, "i": "5NbYrm" }       
                 ]
         }
 ```

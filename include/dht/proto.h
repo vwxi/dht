@@ -18,7 +18,7 @@ struct peer {
     peer(std::string a, u16 p) : addr(a), port(p), staleness(0), id(0) { }
     udp::endpoint endpoint() const { return udp::endpoint{boost::asio::ip::address::from_string(addr), port}; }
     bool operator==(const peer& rhs) const { return !addr.compare(rhs.addr) && port == rhs.port; }
-    std::string operator()() { return fmt::format("{}:{}:{}", addr, port, util::htos(id)); }
+    std::string operator()() { return fmt::format("{}:{}:{}", addr, port, util::b58encode_h(id)); }
 };
 
 namespace proto { // protocol
@@ -49,8 +49,8 @@ struct peer_object {
     MSGPACK_DEFINE_MAP(a, p, i);
     peer_object() { }
     peer_object(std::string a_, int p_, std::string i_) : a(a_), p(p_), i(i_) { }
-    peer_object(peer p_) : a(p_.addr), p(p_.port), i(util::htos(p_.id)) { }
-    peer to_peer() const { return peer(a, p, hash_t(i)); }
+    peer_object(peer p_) : a(p_.addr), p(p_.port), i(util::b58encode_h(p_.id)) { }
+    peer to_peer() const { return peer(a, p, util::b58decode_h(i)); }
 };
 
 struct stored_data {
