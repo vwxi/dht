@@ -5,3 +5,6 @@
 	path = extern/msgpack-c
 	url = https://github.com/msgpack/msgpack-c.git
 	branch = cpp_master
+[submodule "extern/cryptopp-cmake"]
+	path = extern/cryptopp-cmake
+	url = https://github.com/abdes/cryptopp-cmake
