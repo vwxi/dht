@@ -98,6 +98,26 @@ int main(int argc, char** argv) {
             spdlog::info("base58hd('HK6dz') = {}", util::b58encode_h(util::b58decode_h("HK6dz")));
         }
         break;
+    case 9: // testing crypto wrapper
+        {
+            tulip::pki::crypto c1;
+            c1.generate_keypair();
+
+            std::string data = "hello", sig1, sig2;
+            
+            sig1 = c1.sign(data);
+
+            tulip::pki::crypto c2;
+            c2.generate_keypair();
+
+            sig2 = c2.sign(data);
+
+            spdlog::info("verify(c1, sig1) = {}", c1.verify(data, sig1));
+            spdlog::info("verify(c2, sig1) = {}", c2.verify(data, sig2));
+            spdlog::info("verify(c1, sig2) = {}", c1.verify(data, sig2));
+            spdlog::info("verify(c2, sig1) = {}", c2.verify(data, sig1));
+        }
+        break;
     }
 
     return 0;

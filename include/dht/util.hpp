@@ -41,6 +41,7 @@
 #include "spdlog/spdlog.h"
 #include "cryptopp/rsa.h"
 #include "cryptopp/sha.h"
+#include "cryptopp/pssr.h"
 #include "cryptopp/hex.h"
 #include "cryptopp/files.h"
 

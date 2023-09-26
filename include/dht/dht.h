@@ -6,6 +6,7 @@
 #include "bucket.h"
 #include "routing.h"
 #include "network.h"
+#include "crypto.h"
 
 namespace tulip {
 namespace dht {

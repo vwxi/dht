@@ -18,17 +18,23 @@ struct keypair {
 class crypto {
 public:
     crypto();
-    ~crypto() = default;
+
+    // generate keypair
+    void generate_keypair();
 
     // import
-    bool import_keypair(keypair);
+    void import_keypair(keypair);
+    void import_file(std::string, std::string);
 
     // export
     void export_keypair(keypair&);
+    void export_file(std::string, std::string);
 
     // sign
+    std::string sign(std::string);
 
     // verify
+    bool verify(std::string, std::string);
 
 private:
     keypair key_pair;
