@@ -12,24 +12,27 @@ this implementation doesn't have solutions for real world problems such as NAT a
 ```cpp
 #include "dht.h"
 
-int main() {
+int main(int argc, char** argv) {
     using namespace tulip::dht;
+
     node n(std::atoi(argv[2]));
-    
+    n.run();
     n.join(peer(argv[3], std::atoi(argv[4])),
-        [&](peer) { spdlog::info("join was a success."); },
+        [&](peer) { 
+            std::list<node::fv_value> paths = n.disjoint_lookup(true, util::hash("hihi"));
+            for(const auto& p : paths) {
+                spdlog::info("disjoint path ->");
+                if(p.type() == typeid(bucket)) {
+                    for(auto b : boost::get<bucket>(p))
+                        spdlog::info("\tbucket peer {}", b());
+                } else if(p.type() == typeid(kv)) {
+                    kv v = boost::get<kv>(p);
+                    spdlog::info("\tkv {} val {} ts {} origin {}", 
+                        util::b58encode_h(v.key), v.value, v.timestamp, v.origin());
+                }
+            }
+        },
         [&](peer) { spdlog::info("join was a failure."); });
-    
-    fv_value v = n.iter_find_value("test value");
-    if(v.type() == typeid(bucket)) {
-        spdlog::info("\tno value found, bucket instead:");
-        for(auto i : boost::get<bucket>(v))
-            spdlog::info("\t\t{}", i());
-    } else {
-        kv vl = boost::get<kv>(v);
-        spdlog::info("\tvalue found, value is: {}, timestamp is {}, origin is {}", 
-            vl.value, vl.timestamp, vl.origin());
-    }
 
     return 0;
 }
