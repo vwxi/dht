@@ -5,6 +5,14 @@ namespace pki {
 
 crypto::crypto() { }
 
+std::string crypto::pub_key() {
+    std::string pk;
+
+    key_pair.pub_key.Save(StringSink(pk).Ref());
+
+    return pk;
+}
+
 void crypto::generate_keypair() {
     InvertibleRSAFunction params;
     params.GenerateRandomWithKeySize(rng, dht::proto::key_size);

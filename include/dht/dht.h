@@ -31,6 +31,10 @@ public:
     basic_callback basic_nothing = [](peer) { };
 
     node(u16);
+
+    void run();
+    void run(std::string, std::string);
+
     ~node();
 
     proto::status put(std::string, std::string);
@@ -52,7 +56,9 @@ private:
         std::mutex mutex;
         std::list<peer> shortlist;
     };
-    
+
+    void _run();
+
     std::future<fut_t> _lookup(bool, peer, hash_t);
     fv_value lookup(bool, std::deque<peer>, boost::optional<std::shared_ptr<djc>>, hash_t);
 
@@ -72,6 +78,8 @@ private:
 
     hash_t id;
 
+    std::atomic_bool running;
+
     network net;
     
     std::shared_ptr<routing_table> table;
@@ -85,6 +93,8 @@ private:
 
     std::thread refresh_thread;
     std::thread republish_thread;
+
+    pki::crypto crypto;
 };
 
 }

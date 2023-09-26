@@ -11,16 +11,30 @@ node::node(u16 port) :
         std::bind(&node::handle_store, this, _1, _2),
         std::bind(&node::handle_find_node, this, _1, _2),
         std::bind(&node::handle_find_value, this, _1, _2)),
-    reng(rd()) {
+    reng(rd()),
+    running(false) {
     std::srand(std::time(NULL));
+}
 
-    id = util::gen_id(reng);
+node::~node() {
+    if(running) {
+        refresh_thread.join();
+        republish_thread.join();
+    }
+}
+
+/// runners
+
+void node::_run() {
+    id = util::hash(crypto.pub_key());
 
     table = std::make_shared<routing_table>(id, net);
     table_ref = table;
     table->init();
 
-    spdlog::debug("running DHT node on port {} (id: {})", port, util::b58encode_h(id));
+    spdlog::debug("running DHT node on port {} (id: {})", net.port, util::b58encode_h(id));
+    
+    running = true;
 
     net.run();
     
@@ -50,9 +64,16 @@ node::node(u16 port) :
     });
 }
 
-node::~node() {
-    refresh_thread.join();
-    republish_thread.join();
+/// @brief generate keypair, start node
+void node::run() {
+    crypto.generate_keypair();
+    _run();
+}
+
+/// @brief import keypair from files, start node
+void node::run(std::string pub_filename, std::string priv_filename) {
+    crypto.import_file(pub_filename, priv_filename);
+    _run();
 }
 
 /// handlers

@@ -1,7 +1,6 @@
 #ifndef _CRYPTO_H
 #define _CRYPTO_H
 
-#include "osrng.h"
 #include "util.hpp"
 
 namespace tulip {
@@ -18,6 +17,9 @@ struct keypair {
 class crypto {
 public:
     crypto();
+
+    // public access to pub key
+    std::string pub_key();
 
     // generate keypair
     void generate_keypair();

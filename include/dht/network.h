@@ -76,6 +76,7 @@ public:
     b_callback b_nothing = [](boost::system::error_code, std::size_t) { };
 
     msg_queue queue;
+    u16 port;
     
 private:
     void handle(std::string, udp::endpoint);
@@ -87,7 +88,6 @@ private:
 
     boost::asio::io_context ioc;
     std::thread ioc_thread;
-    u16 port;
     udp::socket socket;
     udp::endpoint endpoint;
 };
