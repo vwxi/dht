@@ -101,9 +101,15 @@ int main(int argc, char** argv) {
         {
             node n(std::atoi(argv[2]));
             n.run();
+            n.export_keypair("pub.key", "priv.key");
         }
         break;
-    
+    case 9: // import key
+        {
+            node n(std::atoi(argv[2]));
+            n.run("pub.key", "priv.key");
+        }
+        break;
     }
 
     return 0;

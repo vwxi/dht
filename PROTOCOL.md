@@ -73,6 +73,7 @@ there are four actions:
 - store (`0x01`)
 - find_node (`0x02`)
 - find_value (`0x03`)
+- pub_key (`0x04`)
 
 #### enc-string
 
@@ -357,6 +358,50 @@ where:
                         {"a": "24.30.210.11", "p": 16616, "i": "12JZzN" }, 
                         {"a": "1.1.51.103", "p": 10510, "i": "5NbYrm" }       
                 ]
+        }
+```
+
+### pub_key (`0x04`)
+
+this message is very simple. peer queries for public key in X.509(?) key format (used in crypto++)
+
+#### action-specific data
+
+there is no action-specific data for sender  
+recipient uses the following format:
+
+```
+"d": {
+        "k": <public key>
+}
+```
+
+where:
+- public key is binary data 
+
+#### sequence
+
+#### 1. sender sends initial query
+
+```
+        "s": 0,
+        "m": 0,
+        "a": 4,
+        "i": "HK6dz",
+        "q": 103581305802345,
+        "d": nil
+```
+
+#### 2. recipient sends response with public key
+
+```
+        "s": 0,
+        "m": 1,
+        "a": 4,
+        "i": "bqgzy",
+        "q": 103581305802345,
+        "d": {
+                "k": ff ff ff ff ... 3e 56 7a 10
         }
 ```
 

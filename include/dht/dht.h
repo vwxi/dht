@@ -34,6 +34,7 @@ public:
 
     void run();
     void run(std::string, std::string);
+    void export_keypair(std::string, std::string);
 
     ~node();
 

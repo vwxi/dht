@@ -76,6 +76,12 @@ void node::run(std::string pub_filename, std::string priv_filename) {
     _run();
 }
 
+/// keypair stuff
+
+void node::export_keypair(std::string pub_filename, std::string priv_filename) {
+    crypto.export_file(pub_filename, priv_filename);
+}
+
 /// handlers
 
 void node::handle_ping(peer p, proto::message msg) {
