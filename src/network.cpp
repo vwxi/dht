@@ -89,13 +89,15 @@ network::network(
     m_callback handle_ping_,
     m_callback handle_store_,
     m_callback handle_find_node_,
-    m_callback handle_find_value_) :
+    m_callback handle_find_value_,
+    m_callback handle_pub_key_) :
     port(p),
     socket(ioc, udp::endpoint(udp::v4(), p)),
     handle_ping(handle_ping_),
     handle_store(handle_store_),
     handle_find_node(handle_find_node_),
-    handle_find_value(handle_find_value_) { }
+    handle_find_value(handle_find_value_),
+    handle_pub_key(handle_pub_key_) { }
 
 network::~network() {
     ioc_thread.join();
@@ -157,6 +159,7 @@ void network::handle(std::string buf, udp::endpoint ep) {
         case proto::actions::store: handle_store(std::move(p), std::move(msg)); break;
         case proto::actions::find_node: handle_find_node(std::move(p), std::move(msg)); break;
         case proto::actions::find_value: handle_find_value(std::move(p), std::move(msg)); break;
+        case proto::actions::pub_key: handle_pub_key(std::move(p), std::move(msg)); break;
         }
     } catch (std::exception& e) { spdlog::error("handle exception: {}", e.what()); }
 }

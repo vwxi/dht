@@ -11,6 +11,7 @@ struct peer {
     std::string addr;
     u16 port;
     int staleness;
+    boost::optional<std::string> pub_key;
 
     peer() = default;
     peer(hash_t id_) : id(id_) { }
@@ -29,7 +30,8 @@ enum actions {
     ping = 0,
     store = 1,
     find_node = 2,
-    find_value = 3
+    find_value = 3,
+    pub_key = 4
 };
 
 enum type {
@@ -93,6 +95,13 @@ struct find_value_resp_data {
     boost::optional<stored_data> v;
     boost::optional<std::vector<peer_object>> b;
     MSGPACK_DEFINE_MAP(v, b);
+};
+
+// pub_key
+
+struct pub_key_resp_data {
+    std::string k;
+    MSGPACK_DEFINE_MAP(k);
 };
 
 struct message {

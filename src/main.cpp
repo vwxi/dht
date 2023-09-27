@@ -97,17 +97,20 @@ int main(int argc, char** argv) {
                 [&](peer) { spdlog::info("join was a failure."); });
         }
         break;
-    case 8: // new key, save to file
+    case 8: // pub_key
         {
             node n(std::atoi(argv[2]));
             n.run();
-            n.export_keypair("pub.key", "priv.key");
-        }
-        break;
-    case 9: // import key
-        {
-            node n(std::atoi(argv[2]));
-            n.run("pub.key", "priv.key");
+            n.pub_key(peer(argv[3], std::atoi(argv[4])),
+                [&](peer p, std::string key) {
+                    using namespace CryptoPP;
+                    RSA::PublicKey pk;
+
+                    pk.Load(StringSource(key, true).Ref());
+
+                    spdlog::info("key: {}", util::b58encode_h(util::hash(key)));
+                },
+                n.basic_nothing);
         }
         break;
     }

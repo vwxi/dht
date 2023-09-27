@@ -10,7 +10,8 @@ node::node(u16 port) :
         std::bind(&node::handle_ping, this, _1, _2),
         std::bind(&node::handle_store, this, _1, _2),
         std::bind(&node::handle_find_node, this, _1, _2),
-        std::bind(&node::handle_find_value, this, _1, _2)),
+        std::bind(&node::handle_find_value, this, _1, _2),
+        std::bind(&node::handle_pub_key, this, _1, _2)),
     reng(rd()),
     running(false) {
     std::srand(std::time(NULL));
@@ -230,6 +231,24 @@ void node::handle_find_value(peer p, proto::message msg) {
     }
 }
 
+void node::handle_pub_key(peer p, proto::message msg) {
+    if(msg.m == proto::type::query) {
+        net.send(false,
+            p, proto::type::response, proto::actions::pub_key,
+            id, msg.q, proto::pub_key_resp_data{
+                .k = crypto.pub_key()
+            },
+            net.queue.q_nothing, net.queue.f_nothing);
+    } else if(msg.m == proto::type::response) {
+        proto::pub_key_resp_data d;
+        msg.d.convert(d);
+
+        net.queue.satisfy(p, msg.q, d.k);
+
+        /// @note pub_key does not update table
+    }
+}
+
 /// async actions
 
 void node::ping(peer p, basic_callback ok, basic_callback bad) {
@@ -269,9 +288,7 @@ void node::store(bool origin, peer p, kv val, basic_callback ok, basic_callback 
             else
                 bad(p_);
         },
-        [this, bad](peer p_) { 
-            bad(p_); 
-        });
+        bad);
 }
 
 void node::find_node(peer p, hash_t target_id, bucket_callback ok, basic_callback bad) {
@@ -292,9 +309,7 @@ void node::find_node(peer p, hash_t target_id, bucket_callback ok, basic_callbac
 
             ok(p_, std::move(bkt));
         },
-        [this, bad](peer p_) {
-            bad(p_);
-        });
+        bad);
 }
 
 void node::find_value(peer p, hash_t target_id, find_value_callback ok, basic_callback bad) {
@@ -323,13 +338,27 @@ void node::find_value(peer p, hash_t target_id, find_value_callback ok, basic_ca
                 bad(p_);
             }
         },
-        [this, bad](peer p_) {
-            bad(p_);
-        });
+        bad);
 }
 
 void node::find_value(peer p, std::string key, find_value_callback ok, basic_callback bad) {
     find_value(p, util::hash(key), ok, bad);
+}
+
+void node::pub_key(peer p, pub_key_callback ok, basic_callback bad) {
+    net.send(true,
+        p, proto::type::query, proto::actions::pub_key,
+        id, util::msg_id(), msgpack::type::nil_t(),
+        [this, ok, bad](peer p_, std::string s) {
+            if(p_.id != util::hash(s)) {
+                // if peer id isn't hash(pkey), it's bad
+                bad(p_);
+                return;
+            }
+
+            ok(p_, s);
+        },
+        bad);
 }
 
 std::future<node::fut_t> node::_lookup(bool fv, peer p, hash_t target_id) {

@@ -27,6 +27,7 @@ public:
     using basic_callback = std::function<void(peer)>;
     using bucket_callback = std::function<void(peer, bucket)>;
     using find_value_callback = std::function<void(peer, fv_value)>;
+    using pub_key_callback = std::function<void(peer, std::string)>;
 
     basic_callback basic_nothing = [](peer) { };
 
@@ -47,6 +48,7 @@ public:
     void iter_store(std::string, std::string);
     bucket iter_find_node(hash_t);
     fv_value iter_find_value(std::string);
+    void pub_key(peer, pub_key_callback, basic_callback);
     
     std::list<fv_value> disjoint_lookup(bool, hash_t);
 
@@ -76,6 +78,7 @@ private:
     void handle_store(peer, proto::message);
     void handle_find_node(peer, proto::message);
     void handle_find_value(peer, proto::message);
+    void handle_pub_key(peer, proto::message);
 
     hash_t id;
 

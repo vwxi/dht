@@ -42,7 +42,7 @@ class network {
 public:
     using m_callback = std::function<void(peer, proto::message)>;
 
-    network(u16, m_callback, m_callback, m_callback, m_callback);
+    network(u16, m_callback, m_callback, m_callback, m_callback, m_callback);
     ~network();
 
     void run();
@@ -85,6 +85,7 @@ private:
     m_callback handle_store;
     m_callback handle_find_node;
     m_callback handle_find_value;
+    m_callback handle_pub_key;
 
     boost::asio::io_context ioc;
     std::thread ioc_thread;
