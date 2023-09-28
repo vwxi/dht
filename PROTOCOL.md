@@ -153,13 +153,14 @@ for sender,
         "k": <key>,
         "v": <binary data>
         "o": <origin>
+        "t": <timestamp>,
+        "s": <signature>
 }
 ```
 
 for recipient,
 ```
 "d": {
-        "t": <timestamp>
         "c": <checksum>,
         "s": <status>
 }
@@ -170,10 +171,22 @@ where:
 - binary data (string)
 - origin (peer object or nil)
 - timestamp (64-bit integer timestamp)
+- signature (binary data)
 - checksum (32-bit integer)
 - status (integer, zero = ok, nonzero = error)
 
 if the origin is nil, then the sender is the origin of the key-value pair
+
+the signature signs an encoded map object with the following syntax:
+
+```
+{
+        "k": <key>,
+        "v": <binary data>,
+        "i": <origin's ID ('i' object)>,
+        "t": <timestamp>
+}
+```
 
 #### sequence
 
@@ -189,6 +202,7 @@ if the origin is nil, then the sender is the origin of the key-value pair
                 "k": "5PYPwi",
                 "v": a3 e5 1d 0f 9e ... 6e 77 3a 0e 9f,
                 "o": { "a": "127.0.0.1", "p": 10001, "i": "1vxEC" }
+                "t": 15019835313561
         }
 }
 ```
@@ -202,7 +216,6 @@ if the origin is nil, then the sender is the origin of the key-value pair
         "i": "bqgzy",
         "q": 103581305802345,
         "d": {
-                "t": 15019835313561,
                 "c": 10010501359,
                 "s": 0
         }

@@ -73,7 +73,8 @@ struct store_query_data {
     std::string k;
     std::string v;
     boost::optional<peer_object> o;
-    MSGPACK_DEFINE_MAP(k, v, o);
+    u64 t;
+    MSGPACK_DEFINE_MAP(k, v, o, t);
 };
 
 struct store_resp_data {

@@ -110,7 +110,7 @@ void node::handle_store(peer p, proto::message msg) {
         
         try {
             LOCK(ht_mutex);
-            ht[k] = kv(k, d.v, d.o.has_value() ? d.o.value().to_peer() : p, util::time_now());
+            ht[k] = kv(k, d.v, d.o.has_value() ? d.o.value().to_peer() : p, d.t);
         } catch (std::exception&) { s = proto::status::bad; }
 
         net.send(false,
@@ -274,7 +274,11 @@ void node::store(bool origin, peer p, kv val, basic_callback ok, basic_callback 
 
     net.send(true,
         p, proto::type::query, proto::actions::store,
-        id, util::msg_id(), proto::store_query_data{ .k = util::b58encode_h(val.key), .v = val.value, .o = po },
+        id, util::msg_id(), proto::store_query_data{ 
+            .k = util::b58encode_h(val.key), 
+            .v = val.value, 
+            .o = po,
+            .t = util::time_now() },
         [this, ok, bad, chksum](peer p_, std::string s) { 
             u32 csum;
             std::stringstream ss;
