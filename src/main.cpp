@@ -61,6 +61,7 @@ int main(int argc, char** argv) {
                         kv vl = boost::get<kv>(v);
                         spdlog::info("\tvalue found, value is: {}, timestamp is {}, origin is {}", 
                             vl.value, vl.timestamp, vl.origin());
+                        spdlog::info("\tsig: {}", util::b58encode_s(vl.signature));
                     }
                 }, 
                 n.basic_nothing);
@@ -82,6 +83,7 @@ int main(int argc, char** argv) {
                             kv v = boost::get<kv>(p);
                             spdlog::info("\tkv {} val {} ts {} origin {}", 
                                 util::b58encode_h(v.key), v.value, v.timestamp, v.origin());
+                            spdlog::info("\tVALID? {}", n.crypto.validate(v) ? "yeah" : "nah");
                         }
                     }
                 },

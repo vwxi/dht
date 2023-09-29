@@ -59,7 +59,8 @@ struct stored_data {
     std::string v;
     peer_object o;
     u64 t;
-    MSGPACK_DEFINE_MAP(v, o, t);
+    std::string s;
+    MSGPACK_DEFINE_MAP(v, o, t, s);
 };
 
 struct find_query_data {
@@ -74,7 +75,8 @@ struct store_query_data {
     std::string v;
     boost::optional<peer_object> o;
     u64 t;
-    MSGPACK_DEFINE_MAP(k, v, o, t);
+    std::string s;
+    MSGPACK_DEFINE_MAP(k, v, o, t, s);
 };
 
 struct store_resp_data {
@@ -113,6 +115,16 @@ struct message {
     u64 q;
     msgpack::object d;
     MSGPACK_DEFINE_MAP(s, m, a, i, q, d);
+};
+
+// sig blob
+
+struct sig_blob {
+    std::string k;
+    std::string v;
+    std::string i;
+    u64 t;
+    MSGPACK_DEFINE_MAP(k, v, i, t);
 };
 
 }

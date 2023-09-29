@@ -1,4 +1,5 @@
 #include "crypto.h"
+#include "dht.h"
 
 namespace tulip {
 namespace pki {
@@ -64,6 +65,33 @@ bool crypto::verify(std::string message, std::string signature) {
     } catch (std::exception& e) {
         return false;
     }
+}
+
+void crypto::ks_put(dht::hash_t h, std::string s) {
+    LOCK(ks_mutex);
+    RSA::PublicKey pk;
+
+    try {
+        pk.Load(StringSource(s, true).Ref());
+        ks[h] = std::move(pk);
+    } catch (std::exception& e) { }
+}
+
+boost::optional<RSA::PublicKey> crypto::ks_get(dht::hash_t h) {
+    LOCK(ks_mutex);
+    auto it = ks.find(h);
+    return (it != ks.end()) ? boost::optional<RSA::PublicKey>(it->second) : boost::none;
+}
+
+bool crypto::validate(dht::kv vl) {
+    // try local keystore to get key first
+    auto local = ks_get(vl.key);
+
+    if(local.has_value())
+        return verify(vl.sig_blob(), vl.signature);
+
+    // we'll call pub_key when we get back a value from lookups?
+    return false;
 }
 
 }

@@ -4,6 +4,10 @@
 #include "util.hpp"
 
 namespace tulip {
+namespace dht {
+    struct kv;
+}
+
 namespace pki {
 
 using namespace CryptoPP;
@@ -38,9 +42,19 @@ public:
     // verify
     bool verify(std::string, std::string);
 
+    // keystore
+    void ks_put(dht::hash_t, std::string);
+    boost::optional<RSA::PublicKey> ks_get(dht::hash_t);
+
+    // validate
+    bool validate(dht::kv);
+    
 private:
     keypair key_pair;
     AutoSeededRandomPool rng;
+
+    std::mutex ks_mutex;
+    std::unordered_map<dht::hash_t, RSA::PublicKey> ks;
 };
 
 }

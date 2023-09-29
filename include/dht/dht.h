@@ -16,9 +16,26 @@ struct kv {
     std::string value;
     peer origin;
     u64 timestamp;
+    std::string signature;
     kv() { }
-    kv(hash_t k, const proto::stored_data& s) : key(k), value(s.v), origin(s.o.to_peer()), timestamp(s.t) { } 
-    kv(hash_t k, std::string v, peer o, u64 t) : key(k), value(v), origin(o), timestamp(t) { } 
+    kv(hash_t k, const proto::stored_data& s) : 
+        key(k), value(s.v), origin(s.o.to_peer()), timestamp(s.t), signature(s.s) { } 
+    kv(hash_t k, std::string v, peer o, u64 t, std::string s) : 
+        key(k), value(v), origin(o), timestamp(t), signature(s) { } 
+    std::string sig_blob() const {
+        msgpack::zone z;
+
+        proto::sig_blob sb;
+        sb.k = util::b58encode_h(key); // k: key
+        sb.v = value; // v: value
+        sb.i = util::b58encode_h(origin.id); // i: origin ID
+        sb.t = timestamp; // t: timestamp
+
+        std::stringstream ss;
+        msgpack::pack(ss, sb);
+
+        return ss.str();
+    }
 };
 
 class node {
@@ -98,6 +115,7 @@ private:
     std::thread refresh_thread;
     std::thread republish_thread;
 
+public:
     pki::crypto crypto;
 };
 

@@ -177,7 +177,8 @@ where:
 
 if the origin is nil, then the sender is the origin of the key-value pair
 
-the signature signs an encoded map object with the following syntax:
+the signature is raw binary data which details a signing of an encoded map object   
+with the following syntax using the origin's private key:
 
 ```
 {
@@ -202,7 +203,8 @@ the signature signs an encoded map object with the following syntax:
                 "k": "5PYPwi",
                 "v": a3 e5 1d 0f 9e ... 6e 77 3a 0e 9f,
                 "o": { "a": "127.0.0.1", "p": 10001, "i": "1vxEC" }
-                "t": 15019835313561
+                "t": 15019835313561,
+                "s": ff ff ff ff 00 ... 0e 1a f4 3f dd
         }
 }
 ```
@@ -309,7 +311,8 @@ for recipient,
         "v": {
               "v": <stored value>,
               "o": <origin>,
-              "t": <timestamp>  
+              "t": <timestamp>,
+              "s": <signature>
         } OR nil,
         "b": <nearest nodes> OR nil
 }
@@ -320,6 +323,7 @@ where:
   - stored value (string)
   - origin (peer object)
   - timestamp (64-bit integer)
+  - signature (raw data signature identical to that in the `store` message details)
 - nearest nodes (array of nodes if value not found, nil if value found)
 
 `find_value` **cannot** return **both** a stored value and a node array, such messages should be rejected
@@ -351,7 +355,8 @@ where:
                 "v": {
                         "v": 1e e5 6a 2e 90 ... a0 e4 b7 61 d8,
                         "o": {"a": "127.0.0.1", "p": 16006, "i": "gaofe"},
-                        "t": 196182340981
+                        "t": 196182340981,
+                        "s": ff ff ff ff 00 ... 0e 1a f4 3f dd
                 },
                 "b": nil
         }
@@ -376,7 +381,8 @@ where:
 
 ### pub_key (`0x04`)
 
-this message is very simple. peer queries for public key in X.509(?) key format (used in crypto++)
+this message is very simple. peer queries for public key in X.509(?) key format (used in crypto++).  
+this message does not update the routing table.
 
 #### action-specific data
 

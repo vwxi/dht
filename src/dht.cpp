@@ -110,7 +110,8 @@ void node::handle_store(peer p, proto::message msg) {
         
         try {
             LOCK(ht_mutex);
-            ht[k] = kv(k, d.v, d.o.has_value() ? d.o.value().to_peer() : p, d.t);
+            /// @todo GET VALIDATOR TO VALIDATE STORED DATA
+            ht[k] = kv(k, d.v, d.o.has_value() ? d.o.value().to_peer() : p, d.t, d.s);
         } catch (std::exception&) { s = proto::status::bad; }
 
         net.send(false,
@@ -193,7 +194,8 @@ void node::handle_find_value(peer p, proto::message msg) {
                     id, msg.q, proto::find_value_resp_data{ .v = proto::stored_data{
                         .v = it->second.value,
                         .o = proto::peer_object(it->second.origin),
-                        .t = util::time_now()
+                        .t = it->second.timestamp,
+                        .s = it->second.signature
                     }, .b = boost::none },
                     net.queue.q_nothing, net.queue.f_nothing);
             } else {
@@ -278,7 +280,8 @@ void node::store(bool origin, peer p, kv val, basic_callback ok, basic_callback 
             .k = util::b58encode_h(val.key), 
             .v = val.value, 
             .o = po,
-            .t = util::time_now() },
+            .t = util::time_now(),
+            .s = origin ? crypto.sign(val.sig_blob()) : val.signature },
         [this, ok, bad, chksum](peer p_, std::string s) { 
             u32 csum;
             std::stringstream ss;
@@ -329,7 +332,8 @@ void node::find_value(peer p, hash_t target_id, find_value_callback ok, basic_ca
 
             if(!d.v.has_value() != !d.b.has_value()) {
                 if(d.v.has_value()) {
-                    ok(p_, kv(target_id, d.v.value()));
+                    proto::stored_data sd = d.v.value();
+                    ok(p_, kv(target_id, sd.v, sd.o.to_peer(), sd.t, sd.s));
                 } else if(d.b.has_value()) {
                     bucket bkt(table);
 
@@ -463,6 +467,11 @@ node::fv_value node::lookup(
                 kv vl = boost::get<kv>(v);
                 store(false, closest_node, vl, basic_nothing, basic_nothing);
 
+                // lets try and get the pub_key 
+                pub_key(vl.origin, [&, this](peer p_, std::string s) { 
+                    // add to keystore/cache
+                    crypto.ks_put(p_.id, s);
+                }, basic_nothing);
                 return v;
             }
         }
@@ -531,8 +540,9 @@ void node::iter_store(std::string key, std::string value) {
     hash_t hash = util::hash(key);
     bucket b = iter_find_node(hash);
     // ignores the peer object anyways
-    kv vl(hash, value, peer(), util::time_now());
+    kv vl(hash, value, peer(), util::time_now(), "");
 
+    // store operation does signing already
     for(auto i : b)
         store(true, i, vl, basic_nothing, basic_nothing);
 }
