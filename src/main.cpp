@@ -115,6 +115,23 @@ int main(int argc, char** argv) {
                 n.basic_nothing);
         }
         break;
+    case 9: // crypto test
+        {
+            tulip::pki::crypto c1, c2;
+            std::string data = "hello", s1, s2;
+
+            c1.generate_keypair();
+            c2.generate_keypair();
+
+            s1 = c1.sign(data);
+            s2 = c2.sign(data);
+
+            spdlog::info("verify(c1, s1) = {}", c1.verify(data, s1));
+            spdlog::info("verify(c2, s2) = {}", c2.verify(data, s2));
+            spdlog::info("verify(c2, s1) = {}", c2.verify(data, s1));
+            spdlog::info("verify(c1, s2) = {}", c1.verify(data, s2));
+        }
+        break;
     }
 
     return 0;

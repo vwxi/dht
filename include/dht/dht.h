@@ -71,7 +71,7 @@ public:
 
 private:
     using fut_t = std::tuple<peer, fv_value>;
-    
+
     struct djc {
         std::mutex mutex;
         std::list<peer> shortlist;
@@ -80,6 +80,8 @@ private:
     void _run();
 
     std::future<fut_t> _lookup(bool, peer, hash_t);
+    std::future<std::string> _pub_key(peer);
+    
     fv_value lookup(bool, std::deque<peer>, boost::optional<std::shared_ptr<djc>>, hash_t);
 
     void refresh(tree*);

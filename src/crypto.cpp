@@ -44,16 +44,16 @@ void crypto::export_file(std::string pub_filename, std::string priv_filename) {
 
 std::string crypto::sign(std::string message) {
     std::string signature;
-    RSASS<PSS, SHA256>::Signer signer(key_pair.priv_key);
+    RSASS<PSSR, SHA256>::Signer signer(key_pair.priv_key);
 
     StringSource s1(message, true, new SignerFilter(rng, signer, new StringSink(signature)));
 
     return signature;
 }
 
-bool crypto::verify(std::string message, std::string signature) {
+bool crypto::verify(RSA::PublicKey pk, std::string message, std::string signature) {
     try {
-        RSASS<PSS, SHA256>::Verifier verifier(key_pair.pub_key);
+        RSASS<PSSR, SHA256>::Verifier verifier(pk);
 
         StringSource s1(message+signature, true, 
             new SignatureVerificationFilter(
@@ -67,7 +67,20 @@ bool crypto::verify(std::string message, std::string signature) {
     }
 }
 
+bool crypto::verify(std::string message, std::string signature) {
+    return verify(key_pair.pub_key, message, signature);
+}
+
+boost::optional<RSA::PublicKey> crypto::ks_get(dht::hash_t h) {
+    LOCK(ks_mutex);
+    return (ks.find(h) != ks.end()) ? 
+        boost::optional<RSA::PublicKey>(ks[h]) : boost::none;
+}
+
 void crypto::ks_put(dht::hash_t h, std::string s) {
+    if(s.empty() || ks_get(h).has_value())
+        return;
+
     LOCK(ks_mutex);
     RSA::PublicKey pk;
 
@@ -77,18 +90,12 @@ void crypto::ks_put(dht::hash_t h, std::string s) {
     } catch (std::exception& e) { }
 }
 
-boost::optional<RSA::PublicKey> crypto::ks_get(dht::hash_t h) {
-    LOCK(ks_mutex);
-    auto it = ks.find(h);
-    return (it != ks.end()) ? boost::optional<RSA::PublicKey>(it->second) : boost::none;
-}
-
 bool crypto::validate(dht::kv vl) {
     // try local keystore to get key first
-    auto local = ks_get(vl.key);
+    auto local = ks_get(vl.origin.id);
 
     if(local.has_value())
-        return verify(vl.sig_blob(), vl.signature);
+        return verify(local.value(), vl.sig_blob(), vl.signature);
 
     // we'll call pub_key when we get back a value from lookups?
     return false;

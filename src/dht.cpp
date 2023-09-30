@@ -269,6 +269,9 @@ void node::ping(peer p, basic_callback ok, basic_callback bad) {
 
 void node::store(bool origin, peer p, kv val, basic_callback ok, basic_callback bad) {
     u32 chksum = util::crc32b((u8*)val.value.data());
+    
+    // hacky
+    val.origin.id = id;
 
     boost::optional<proto::peer_object> po = origin ? 
         boost::optional<proto::peer_object>(boost::none) : 
@@ -280,7 +283,7 @@ void node::store(bool origin, peer p, kv val, basic_callback ok, basic_callback 
             .k = util::b58encode_h(val.key), 
             .v = val.value, 
             .o = po,
-            .t = util::time_now(),
+            .t = val.timestamp,
             .s = origin ? crypto.sign(val.sig_blob()) : val.signature },
         [this, ok, bad, chksum](peer p_, std::string s) { 
             u32 csum;
@@ -386,6 +389,17 @@ std::future<node::fut_t> node::_lookup(bool fv, peer p, hash_t target_id) {
     return fut;
 }
 
+std::future<std::string> node::_pub_key(peer p) {
+    std::shared_ptr<std::promise<std::string>> prom = std::make_shared<std::promise<std::string>>();
+    std::future<std::string> fut = prom->get_future();
+
+    pub_key(p,
+        [&, prom](peer, std::string s) { prom->set_value(s); },
+        [&, prom](peer) { prom->set_value(""); });
+
+    return fut;
+}
+
 // synchronous operation
 // see xlattice/kademlia lookup
 node::fv_value node::lookup(
@@ -467,11 +481,13 @@ node::fv_value node::lookup(
                 kv vl = boost::get<kv>(v);
                 store(false, closest_node, vl, basic_nothing, basic_nothing);
 
-                // lets try and get the pub_key 
-                pub_key(vl.origin, [&, this](peer p_, std::string s) { 
-                    // add to keystore/cache
-                    crypto.ks_put(p_.id, s);
-                }, basic_nothing);
+                // obtain public key
+                std::future<std::string> fs = _pub_key(vl.origin);
+                std::string s = fs.get();
+
+                // add to keystore/cache
+                crypto.ks_put(vl.origin.id, s);
+
                 return v;
             }
         }

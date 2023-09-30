@@ -40,6 +40,7 @@ public:
     std::string sign(std::string);
 
     // verify
+    bool verify(RSA::PublicKey, std::string, std::string);
     bool verify(std::string, std::string);
 
     // keystore
