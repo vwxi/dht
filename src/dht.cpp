@@ -10,17 +10,32 @@ node::node(u16 port) :
         std::bind(&node::handle_ping, this, _1, _2),
         std::bind(&node::handle_store, this, _1, _2),
         std::bind(&node::handle_find_node, this, _1, _2),
-        std::bind(&node::handle_find_value, this, _1, _2)),
-    reng(rd()) {
+        std::bind(&node::handle_find_value, this, _1, _2),
+        std::bind(&node::handle_pub_key, this, _1, _2)),
+    reng(rd()),
+    running(false) {
     std::srand(std::time(NULL));
+}
 
-    id = util::gen_id(reng);
+node::~node() {
+    if(running) {
+        refresh_thread.join();
+        republish_thread.join();
+    }
+}
+
+/// runners
+
+void node::_run() {
+    id = util::hash(crypto.pub_key());
 
     table = std::make_shared<routing_table>(id, net);
     table_ref = table;
     table->init();
 
-    spdlog::debug("running DHT node on port {} (id: {})", port, util::htos(id));
+    spdlog::debug("running DHT node on port {} (id: {})", net.port, util::b58encode_h(id));
+    
+    running = true;
 
     net.run();
     
@@ -50,9 +65,22 @@ node::node(u16 port) :
     });
 }
 
-node::~node() {
-    refresh_thread.join();
-    republish_thread.join();
+/// @brief generate keypair, start node
+void node::run() {
+    crypto.generate_keypair();
+    _run();
+}
+
+/// @brief import keypair from files, start node
+void node::run(std::string pub_filename, std::string priv_filename) {
+    crypto.import_file(pub_filename, priv_filename);
+    _run();
+}
+
+/// keypair stuff
+
+void node::export_keypair(std::string pub_filename, std::string priv_filename) {
+    crypto.export_file(pub_filename, priv_filename);
 }
 
 /// handlers
@@ -75,14 +103,15 @@ void node::handle_store(peer p, proto::message msg) {
         proto::store_query_data d;
         msg.d.convert(d);
 
-        hash_t k(util::to_bin(d.k));
+        hash_t k(util::b58decode_h(d.k));
         u32 chksum = util::crc32b((u8*)d.v.data());
 
         int s = proto::status::ok;
         
         try {
             LOCK(ht_mutex);
-            ht[k] = kv(k, d.v, d.o.has_value() ? d.o.value().to_peer() : p, util::time_now());
+            /// @todo GET VALIDATOR TO VALIDATE STORED DATA
+            ht[k] = kv(k, d.v, d.o.has_value() ? d.o.value().to_peer() : p, d.t, d.s);
         } catch (std::exception&) { s = proto::status::bad; }
 
         net.send(false,
@@ -113,12 +142,12 @@ void node::handle_find_node(peer p, proto::message msg) {
         proto::find_query_data d;
         msg.d.convert(d);
 
-        hash_t target_id(util::to_bin(d.t));
+        hash_t target_id(util::b58decode_h(d.t));
         bucket bkt = table->find_bucket(peer(target_id));
 
         std::vector<proto::peer_object> b;
         for(auto i : bkt)
-            b.push_back(proto::peer_object(i.addr, i.port, util::htos(i.id)));
+            b.push_back(proto::peer_object(i.addr, i.port, util::b58encode_h(i.id)));
 
         net.send(false,
             p, proto::type::response, proto::actions::find_node,
@@ -153,7 +182,7 @@ void node::handle_find_value(peer p, proto::message msg) {
         proto::find_query_data d;
         msg.d.convert(d);
 
-        hash_t target_id(util::to_bin(d.t));
+        hash_t target_id(util::b58decode_h(d.t));
 
         {
             LOCK(ht_mutex);
@@ -165,7 +194,8 @@ void node::handle_find_value(peer p, proto::message msg) {
                     id, msg.q, proto::find_value_resp_data{ .v = proto::stored_data{
                         .v = it->second.value,
                         .o = proto::peer_object(it->second.origin),
-                        .t = util::time_now()
+                        .t = it->second.timestamp,
+                        .s = it->second.signature
                     }, .b = boost::none },
                     net.queue.q_nothing, net.queue.f_nothing);
             } else {
@@ -174,7 +204,7 @@ void node::handle_find_value(peer p, proto::message msg) {
 
                 std::vector<proto::peer_object> b;
                 for(auto i : bkt)
-                    b.push_back(proto::peer_object{i.addr, i.port, util::htos(i.id)});
+                    b.push_back(proto::peer_object{i.addr, i.port, util::b58encode_h(i.id)});
 
                 net.send(false,
                     p, proto::type::response, proto::actions::find_value,
@@ -203,6 +233,24 @@ void node::handle_find_value(peer p, proto::message msg) {
     }
 }
 
+void node::handle_pub_key(peer p, proto::message msg) {
+    if(msg.m == proto::type::query) {
+        net.send(false,
+            p, proto::type::response, proto::actions::pub_key,
+            id, msg.q, proto::pub_key_resp_data{
+                .k = crypto.pub_key()
+            },
+            net.queue.q_nothing, net.queue.f_nothing);
+    } else if(msg.m == proto::type::response) {
+        proto::pub_key_resp_data d;
+        msg.d.convert(d);
+
+        net.queue.satisfy(p, msg.q, d.k);
+
+        /// @note pub_key does not update table
+    }
+}
+
 /// async actions
 
 void node::ping(peer p, basic_callback ok, basic_callback bad) {
@@ -221,6 +269,9 @@ void node::ping(peer p, basic_callback ok, basic_callback bad) {
 
 void node::store(bool origin, peer p, kv val, basic_callback ok, basic_callback bad) {
     u32 chksum = util::crc32b((u8*)val.value.data());
+    
+    // hacky
+    val.origin.id = id;
 
     boost::optional<proto::peer_object> po = origin ? 
         boost::optional<proto::peer_object>(boost::none) : 
@@ -228,7 +279,12 @@ void node::store(bool origin, peer p, kv val, basic_callback ok, basic_callback 
 
     net.send(true,
         p, proto::type::query, proto::actions::store,
-        id, util::msg_id(), proto::store_query_data{ .k = util::htos(val.key), .v = val.value, .o = po },
+        id, util::msg_id(), proto::store_query_data{ 
+            .k = util::b58encode_h(val.key), 
+            .v = val.value, 
+            .o = po,
+            .t = val.timestamp,
+            .s = origin ? crypto.sign(val.sig_blob()) : val.signature },
         [this, ok, bad, chksum](peer p_, std::string s) { 
             u32 csum;
             std::stringstream ss;
@@ -242,15 +298,13 @@ void node::store(bool origin, peer p, kv val, basic_callback ok, basic_callback 
             else
                 bad(p_);
         },
-        [this, bad](peer p_) { 
-            bad(p_); 
-        });
+        bad);
 }
 
 void node::find_node(peer p, hash_t target_id, bucket_callback ok, basic_callback bad) {
     net.send(true,
         p, proto::type::query, proto::actions::find_node,
-        id, util::msg_id(), proto::find_query_data { .t = util::htos(target_id) },
+        id, util::msg_id(), proto::find_query_data { .t = util::b58encode_h(target_id) },
         [this, ok, bad](peer p_, std::string s) {
             msgpack::object_handle oh;
             msgpack::unpack(oh, s.data(), s.size());
@@ -261,19 +315,17 @@ void node::find_node(peer p, hash_t target_id, bucket_callback ok, basic_callbac
             bucket bkt(table);
 
             for(auto i : b.b)
-                bkt.push_back(peer(i.a, i.p, hash_t(util::to_bin(i.i))));
+                bkt.push_back(peer(i.a, i.p, util::b58decode_h(i.i)));
 
             ok(p_, std::move(bkt));
         },
-        [this, bad](peer p_) {
-            bad(p_);
-        });
+        bad);
 }
 
 void node::find_value(peer p, hash_t target_id, find_value_callback ok, basic_callback bad) {
     net.send(true,
         p, proto::type::query, proto::actions::find_value,
-        id, util::msg_id(), proto::find_query_data { .t = util::htos(target_id) },
+        id, util::msg_id(), proto::find_query_data { .t = util::b58encode_h(target_id) },
         [this, ok, bad, target_id](peer p_, std::string s) {
             msgpack::object_handle oh;
             msgpack::unpack(oh, s.data(), s.size());
@@ -283,12 +335,13 @@ void node::find_value(peer p, hash_t target_id, find_value_callback ok, basic_ca
 
             if(!d.v.has_value() != !d.b.has_value()) {
                 if(d.v.has_value()) {
-                    ok(p_, kv(target_id, d.v.value()));
+                    proto::stored_data sd = d.v.value();
+                    ok(p_, kv(target_id, sd.v, sd.o.to_peer(), sd.t, sd.s));
                 } else if(d.b.has_value()) {
                     bucket bkt(table);
 
                     for(auto i : d.b.value())
-                        bkt.push_back(peer(i.a, i.p, hash_t(util::to_bin(i.i))));
+                        bkt.push_back(peer(i.a, i.p, util::b58decode_h(i.i)));
 
                     ok(p_, std::move(bkt));
                 }
@@ -296,13 +349,27 @@ void node::find_value(peer p, hash_t target_id, find_value_callback ok, basic_ca
                 bad(p_);
             }
         },
-        [this, bad](peer p_) {
-            bad(p_);
-        });
+        bad);
 }
 
 void node::find_value(peer p, std::string key, find_value_callback ok, basic_callback bad) {
-    find_value(p, util::sha1(key), ok, bad);
+    find_value(p, util::hash(key), ok, bad);
+}
+
+void node::pub_key(peer p, pub_key_callback ok, basic_callback bad) {
+    net.send(true,
+        p, proto::type::query, proto::actions::pub_key,
+        id, util::msg_id(), msgpack::type::nil_t(),
+        [this, ok, bad](peer p_, std::string s) {
+            if(p_.id != util::hash(s)) {
+                // if peer id isn't hash(pkey), it's bad
+                bad(p_);
+                return;
+            }
+
+            ok(p_, s);
+        },
+        bad);
 }
 
 std::future<node::fut_t> node::_lookup(bool fv, peer p, hash_t target_id) {
@@ -318,6 +385,17 @@ std::future<node::fut_t> node::_lookup(bool fv, peer p, hash_t target_id) {
             [&, prom](peer p_, bucket v) { prom->set_value(fut_t{std::move(p_), std::move(v)}); },
             [&, prom](peer p_) { prom->set_value(fut_t{std::move(p_), fv_value{boost::blank()}}); });        
     }
+
+    return fut;
+}
+
+std::future<std::string> node::_pub_key(peer p) {
+    std::shared_ptr<std::promise<std::string>> prom = std::make_shared<std::promise<std::string>>();
+    std::future<std::string> fut = prom->get_future();
+
+    pub_key(p,
+        [&, prom](peer, std::string s) { prom->set_value(s); },
+        [&, prom](peer) { prom->set_value(""); });
 
     return fut;
 }
@@ -403,6 +481,13 @@ node::fv_value node::lookup(
                 kv vl = boost::get<kv>(v);
                 store(false, closest_node, vl, basic_nothing, basic_nothing);
 
+                // obtain public key
+                std::future<std::string> fs = _pub_key(vl.origin);
+                std::string s = fs.get();
+
+                // add to keystore/cache
+                crypto.ks_put(vl.origin.id, s);
+
                 return v;
             }
         }
@@ -429,6 +514,149 @@ node::fv_value node::lookup(
         res.resize(proto::bucket_size);
 
     return res;
+}
+
+// haven't adapted for disjoint lookups yet
+// https://github.com/libp2p/specs/blob/master/kad-dht/README.md#value-retrieval
+node::fv_value node::lp_lookup(hash_t key, int Q) {
+    int cnt = 0;
+    std::atomic_int pending{0};
+    kv best;
+    bool best_empty = true;
+    std::deque<peer> pb, pq, pn, po;
+
+    // search for key in local store, if `Q` == 0 or 1, the search is complete
+    {
+        LOCK(ht_mutex);
+        auto it = ht.find(key);
+
+        if(it != ht.end() && Q < 2) {
+            spdlog::debug("Q<2, found in local store, returning.");
+            return it->second;
+        } else if(it != ht.end()) {
+            // otherwise, we count it as one of the values
+            
+            cnt++;
+            best = it->second;
+            spdlog::debug("found already in local store, adding to values.");
+        }
+    }
+
+    // seed `pn` with `a` peers
+    pn = table->find_alpha(peer(key));
+
+    // start iterative search
+    while(true) {
+        // if we've collected `Q` or more answers, return `best`.
+        // if there are no requests pending and `pn` is empty, return `best`.
+        if(cnt >= Q || (pending == 0 && pn.empty())) {
+            spdlog::debug("quorum reached. sending stores to outdated nodes.");
+
+            // storing `best` at `po` nodes
+            for(auto p : po) {
+                spdlog::debug("storing best value at {}", p());
+                store(false, p, best, basic_nothing, basic_nothing);
+            }
+
+            return best;
+        }
+
+        std::list<std::future<fut_t>> tasks;
+
+        // send `alpha` `pn` peers a find_value
+        int n = 0;
+        for(auto p = pn.begin(); p != pn.end() && n < proto::alpha; p++, n++) {
+            // `pending` should never be larger than `alpha`
+            pending++;
+            tasks.push_back(_lookup(true, *p, key));
+            spdlog::debug("querying {}...", (*p)());
+
+            // mark it as queried in `pq`
+            pq.push_back(*p);
+        }
+
+        for(auto&& t : tasks) {
+            pending--;
+
+            fut_t f = t.get();
+            peer p = std::get<0>(f);
+            fv_value v = std::get<1>(f);
+
+            // for loop is in order of pn, not in terms of arrival. this is ok?
+            pn.pop_front();
+
+            // if an error or timeout occurs, discard it
+            if(v.type() == typeid(boost::blank)) {
+                spdlog::debug("timeout/error from {}, discarding.", p());        
+                continue;
+            }
+
+            spdlog::debug("message back from {} ->", p());
+
+            // if without value, add not already queried/to be queried closest nodes to `pn`
+            if(v.type() == typeid(bucket)) {
+                spdlog::debug("\treceived bucket, adding unvisited peers ->");
+                for(auto p_ : boost::get<bucket>(v)) {
+                    if(std::count(pq.begin(), pq.end(), p_) == 0 &&
+                        std::count(pn.begin(), pn.end(), p_) == 0) {
+                        spdlog::debug("\t\tpeer {}", p_());
+                        pn.push_back(p_);
+                    }
+                }
+            }
+
+            // if we receive a value,
+            else if(v.type() == typeid(kv)) {
+                kv kv_ = boost::get<kv>(v);
+                cnt++;
+
+                spdlog::debug("\treceived value ->");
+
+                // if this is the first value we've seen, 
+                // store it in `best` and store peer in `pb` (best peer list)
+                if(best_empty) {
+                    spdlog::debug("\t\tfirst value received, adding to best.");
+                    best_empty = false;
+                    best = kv_;
+                    pb.push_back(p);
+                } else {
+                    // otherwise, we resolve the conflict by calling validator
+
+                    spdlog::debug("\t\tresolving conflict with validator ->");
+                    // select newest and most valid between `best` and this value.
+                    // if equal(?) just add peer to `pb`
+                    if(crypto.validate(kv_) && kv_.timestamp >= best.timestamp) {
+                        // if new value is equal just add to `pb`
+                        if(kv_.timestamp == best.timestamp) {
+                            spdlog::debug("\t\t\tnew value is equal to best, adding peer to pb.");
+                            pb.push_back(p);
+                        }
+                        
+                        // if new value wins, mark all peers in `pb` as 
+                        // outdated (empty `pb` into `po`) and set new peer as `best`
+                        // and also add it to `pb`
+                        else {
+                            spdlog::debug("\t\t\tnew value wins, marking peers as outdated ->");
+
+                            for(auto o : pb) {
+                                spdlog::debug("\t\t\t\tmarking peer {} as outdated", o());
+                                po.push_back(o);
+                            }
+                            
+                            spdlog::debug("\t\t\tclearing pb, setting new value as best, pushing peer to pb");
+                            pb.clear();
+                            best = kv_;
+                            pb.push_back(p);
+                        }
+                    } else {
+                        // if new value loses, add current peer to `po`
+                        spdlog::debug("\t\t\tnew value lost, adding current peer to po");
+                        po.push_back(p);
+                    }
+                }
+            }
+        }
+    }
 }
 
 std::list<node::fv_value> node::disjoint_lookup(bool fv, hash_t target_id) {
@@ -468,11 +696,12 @@ std::list<node::fv_value> node::disjoint_lookup(bool fv, hash_t target_id) {
 
 // this is for a new key-value pair
 void node::iter_store(std::string key, std::string value) {
-    hash_t hash = util::sha1(key);
+    hash_t hash = util::hash(key);
     bucket b = iter_find_node(hash);
     // ignores the peer object anyways
-    kv vl(hash, value, peer(), util::time_now());
+    kv vl(hash, value, peer(), util::time_now(), "");
 
+    // store operation does signing already
     for(auto i : b)
         store(true, i, vl, basic_nothing, basic_nothing);
 }
@@ -500,7 +729,7 @@ bucket node::iter_find_node(hash_t target_id) {
 
 /// @note xlattice says so ... others say get() will be iter_find_node then find_value 
 node::fv_value node::iter_find_value(std::string key) {
-    hash_t hash = util::sha1(key);
+    hash_t hash = util::hash(key);
     std::deque<peer> shortlist = table->find_alpha(peer(hash));
     return lookup(true, shortlist, boost::none, hash);
 }
@@ -517,13 +746,13 @@ void node::refresh(tree* ptr) {
     if(!bkt.empty()) {
         W_LOCK(table->mutex);
         ptr->data = bkt;
-        spdlog::debug("refreshed bucket {}, sz: {}", ptr->prefix.prefix.to_string(), ptr->data.size());
+        spdlog::debug("refreshed bucket {}, sz: {}", util::htos(ptr->prefix.prefix), ptr->data.size());
     }
 }
 
 void node::join(peer p_, basic_callback ok, basic_callback bad) {
     // add peer to routing table
-    ping(p_, [&, this](peer p) {
+    ping(p_, [this, ok](peer p) {
         // lookup our own id
         bucket bkt = iter_find_node(id);
 

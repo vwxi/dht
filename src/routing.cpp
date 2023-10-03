@@ -52,7 +52,7 @@ void routing_table::traverse(bool p, hash_t t, tree** ptr, int& cutoff) {
     if(!*ptr) return;
 
     while((*(*ptr)).leaf == false) {
-        if(t[proto::bit_hash_width - cutoff++]) {
+        if(t & (1 << (proto::bit_hash_width - cutoff++))) {
             if(!(*(*ptr)).right) { *ptr = NULL; return; }
             else if(p && (*ptr)->right->leaf) return;
             *ptr = (*ptr)->right;
@@ -83,7 +83,7 @@ void routing_table::split(tree* t, int cutoff) {
     t->leaf = false;
 
     for(auto& it : t->data) {
-        if(it.id[proto::bit_hash_width - cutoff]) {
+        if(it.id & (1 << (proto::bit_hash_width - cutoff))) {
             t->right->data.push_back(it);
         } else { 
             t->left->data.push_back(it);

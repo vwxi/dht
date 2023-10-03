@@ -9,7 +9,7 @@ as defined in `include/dht/util.hpp` and `include/dht/proto.h`:
 
 - hash width in u32s (`u32_hash_width`) (default: 5)
 - number of peer entries allowed in one bucket (`bucket_size`) (default: 20)
-- hash width in bits (`bit_hash_width`) (default: 160)
+- hash width in bits (`bit_hash_width`) (default: 256)
 - number of missed pings allowed (`missed_pings_allowed`) (default: 3) (CHANGE!)
 - number of missed messages allowed (`missed_messages_allowed`) (default: 3) (CHANGE!)
 - number of seconds until timeout (`net_timeout`) (default: 10) (CHANGE!)
@@ -21,6 +21,7 @@ as defined in `include/dht/util.hpp` and `include/dht/proto.h`:
 - number of seconds between each routing table refresh (`refresh_interval`) (default: 600)
 - number of seconds between key-value republications (`refresh_interval`) (default: 86400)
 - number of disjoint paths to take for lookups (`disjoint_paths`) (default: 3)
+- size of public/private keys in bytes (`key_size`) (default: 2048)
 
 ## messages
 
@@ -39,7 +40,7 @@ one message per client should be handled at any time. a client should not have m
         "s": <schema version>,
         "m": <message type>,
         "a": <action>,
-        "i": <hex-string>,
+        "i": <enc-string>,
         "q": <message ID>,
         "d": {
                 <action-specific data>
@@ -50,7 +51,7 @@ one message per client should be handled at any time. a client should not have m
 peer objects are formatted like so:
 
 ```
-{ "a": <address>, "p": <port>, "i": <hex-string> }
+{ "a": <address>, "p": <port>, "i": <enc-string> }
 ```
 
 #### schema version
@@ -72,13 +73,30 @@ there are four actions:
 - store (`0x01`)
 - find_node (`0x02`)
 - find_value (`0x03`)
+- pub_key (`0x04`)
 
-#### hex-string
+#### enc-string
 
-for example:
+enc-strings are base58-encoded strings
 
-- `01234567abcdef`
-- `1b1b30aeb0df0ed0f0c0ba03548135`
+this protocol uses this alphabet:
+
+```cpp
+static const char b58map[] = {
+  '1', '2', '3', '4', '5', '6', '7', '8',
+  '9', 'A', 'B', 'C', 'D', 'E', 'F', 'G',
+  'H', 'J', 'K', 'L', 'M', 'N', 'P', 'Q',
+  'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y',
+  'Z', 'a', 'b', 'c', 'd', 'e', 'f', 'g',
+  'h', 'i', 'j', 'k', 'm', 'n', 'o', 'p',
+  'q', 'r', 's', 't', 'u', 'v', 'w', 'x',
+  'y', 'z' };
+```
+
+examples (base58 -> hex):
+
+- `HK6dz` -> `0xb00b1e5`
+- `4vygUjcYGbG` -> `0x177ff13e0a8ef567`
 
 #### message ID
 
@@ -105,7 +123,7 @@ there is no extra data to be sent from both parties
         "s": 0,
         "m": 0,
         "a": 0,
-        "i": "0b00b1e5",
+        "i": "HK6dz",
         "q": 103581305802345,
         "d": nil
 }
@@ -117,7 +135,7 @@ there is no extra data to be sent from both parties
         "s": 0,
         "m": 1,
         "a": 0,
-        "i": "177ff13e",
+        "i": "bqgzy",
         "q": 103581305802345,
         "d": nil
 }
@@ -135,27 +153,41 @@ for sender,
         "k": <key>,
         "v": <binary data>
         "o": <origin>
+        "t": <timestamp>,
+        "s": <signature>
 }
 ```
 
 for recipient,
 ```
 "d": {
-        "t": <timestamp>
         "c": <checksum>,
         "s": <status>
 }
 ```
 
 where:
-- the key (hex-string)
+- the key (enc-string)
 - binary data (string)
 - origin (peer object or nil)
 - timestamp (64-bit integer timestamp)
+- signature (binary data)
 - checksum (32-bit integer)
 - status (integer, zero = ok, nonzero = error)
 
 if the origin is nil, then the sender is the origin of the key-value pair
+
+the signature is raw binary data which details a signing of an encoded map object   
+with the following syntax using the origin's private key:
+
+```
+{
+        "k": <key>,
+        "v": <binary data>,
+        "i": <origin's ID ('i' object)>,
+        "t": <timestamp>
+}
+```
 
 #### sequence
 
@@ -165,12 +197,14 @@ if the origin is nil, then the sender is the origin of the key-value pair
         "s": 0,
         "m": 0,
         "a": 1,
-        "i": "0b00b1e5",
+        "i": "HK6dz",
         "q": 103581305802345,
         "d": {
-                "k": "abb12e35",
+                "k": "5PYPwi",
                 "v": a3 e5 1d 0f 9e ... 6e 77 3a 0e 9f,
-                "o": { "a": "127.0.0.1", "p": 10001, "i": "00a0a001" }
+                "o": { "a": "127.0.0.1", "p": 10001, "i": "1vxEC" }
+                "t": 15019835313561,
+                "s": ff ff ff ff 00 ... 0e 1a f4 3f dd
         }
 }
 ```
@@ -181,10 +215,9 @@ if the origin is nil, then the sender is the origin of the key-value pair
         "s": 0,
         "m": 0,
         "a": 1,
-        "i": "177ff13e",
+        "i": "bqgzy",
         "q": 103581305802345,
         "d": {
-                "t": 15019835313561,
                 "c": 10010501359,
                 "s": 0
         }
@@ -204,7 +237,7 @@ for sender,
 }
 ```
 
-where the target ID is a hex-string  
+where the target ID is a enc-string  
 
 for recipient, "buckets" are serialized into arrays where each element describes a peer, like so:
 
@@ -218,7 +251,7 @@ for recipient, "buckets" are serialized into arrays where each element describes
 }
 ```
 
-where IP addresses are strings, ports are integers and IDs are hex-strings
+where IP addresses are strings, ports are integers and IDs are enc-strings
 
 if there are no nearby nodes, the bucket may be empty
 
@@ -230,10 +263,10 @@ if there are no nearby nodes, the bucket may be empty
         "s": 0,
         "m": 0,
         "a": 2,
-        "i": "0b00b1e5",
+        "i": "HK6dz",
         "q": 103581305802345,
         "d": {
-                "t": "19aebc67"
+                "t": "f5PBC"
         }
 ```
 
@@ -244,12 +277,12 @@ if there are no nearby nodes, the bucket may be empty
         "s": 0,
         "m": 1,
         "a": 2,
-        "i": "177ff13e",
+        "i": "bqgzy",
         "q": 103581305802345,
         "d": {
                 "b": [
-                        {"a": "24.30.210.11", "p": 16616, "i": "00e0fb37" }, 
-                        {"a": "1.1.51.103", "p": 10510, "i": "ab0de4c2" }
+                        {"a": "24.30.210.11", "p": 16616, "i": "12JZzN" }, 
+                        {"a": "1.1.51.103", "p": 10510, "i": "5NbYrm" }
                 ]
         }
 }
@@ -269,7 +302,7 @@ for sender,
 }
 ```
 
-where the target ID is a hex-string
+where the target ID is a enc-string
 
 for recipient,
 
@@ -278,7 +311,8 @@ for recipient,
         "v": {
               "v": <stored value>,
               "o": <origin>,
-              "t": <timestamp>  
+              "t": <timestamp>,
+              "s": <signature>
         } OR nil,
         "b": <nearest nodes> OR nil
 }
@@ -289,6 +323,7 @@ where:
   - stored value (string)
   - origin (peer object)
   - timestamp (64-bit integer)
+  - signature (raw data signature identical to that in the `store` message details)
 - nearest nodes (array of nodes if value not found, nil if value found)
 
 `find_value` **cannot** return **both** a stored value and a node array, such messages should be rejected
@@ -301,10 +336,10 @@ where:
         "s": 0,
         "m": 0,
         "a": 3,
-        "i": "0b00b1e5",
+        "i": "HK6dz",
         "q": 103581305802345,
         "d": {
-                "t": "19aebc67"
+                "t": "f5PBC"
         }
 ```
 
@@ -314,13 +349,14 @@ where:
         "s": 0,
         "m": 1,
         "a": 3,
-        "i": "177ff13e",
+        "i": "bqgzy",
         "q": 103581305802345,
         "d": {
                 "v": {
                         "v": 1e e5 6a 2e 90 ... a0 e4 b7 61 d8,
-                        "o": {"a": "127.0.0.1", "p": 16006, "i": "1ab301d1"},
-                        "t": 196182340981z
+                        "o": {"a": "127.0.0.1", "p": 16006, "i": "gaofe"},
+                        "t": 196182340981,
+                        "s": ff ff ff ff 00 ... 0e 1a f4 3f dd
                 },
                 "b": nil
         }
@@ -332,14 +368,59 @@ where:
         "s": 0,
         "m": 1,
         "a": 3,
-        "i": "177ff13e",
+        "i": "bqgzy",
         "q": 103581305802345,
         "d": {
                 "v": nil,
                 "b": [
-                        {"a": "24.30.210.11", "p": 16616, "i": "00e0fb37" }, 
-                        {"a": "1.1.51.103", "p": 10510, "i": "ab0de4c2" }       
+                        {"a": "24.30.210.11", "p": 16616, "i": "12JZzN" }, 
+                        {"a": "1.1.51.103", "p": 10510, "i": "5NbYrm" }       
                 ]
+        }
+```
+
+### pub_key (`0x04`)
+
+this message is very simple. peer queries for public key in X.509(?) key format (used in crypto++).  
+this message does not update the routing table.
+
+#### action-specific data
+
+there is no action-specific data for sender  
+recipient uses the following format:
+
+```
+"d": {
+        "k": <public key>
+}
+```
+
+where:
+- public key is binary data 
+
+#### sequence
+
+#### 1. sender sends initial query
+
+```
+        "s": 0,
+        "m": 0,
+        "a": 4,
+        "i": "HK6dz",
+        "q": 103581305802345,
+        "d": nil
+```
+
+#### 2. recipient sends response with public key
+
+```
+        "s": 0,
+        "m": 1,
+        "a": 4,
+        "i": "bqgzy",
+        "q": 103581305802345,
+        "d": {
+                "k": ff ff ff ff ... 3e 56 7a 10
         }
 ```
 

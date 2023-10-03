@@ -6,6 +6,7 @@
 #include "bucket.h"
 #include "routing.h"
 #include "network.h"
+#include "crypto.h"
 
 namespace tulip {
 namespace dht {
@@ -15,9 +16,26 @@ struct kv {
     std::string value;
     peer origin;
     u64 timestamp;
+    std::string signature;
     kv() { }
-    kv(hash_t k, const proto::stored_data& s) : key(k), value(s.v), origin(s.o.to_peer()), timestamp(s.t) { } 
-    kv(hash_t k, std::string v, peer o, u64 t) : key(k), value(v), origin(o), timestamp(t) { } 
+    kv(hash_t k, const proto::stored_data& s) : 
+        key(k), value(s.v), origin(s.o.to_peer()), timestamp(s.t), signature(s.s) { } 
+    kv(hash_t k, std::string v, peer o, u64 t, std::string s) : 
+        key(k), value(v), origin(o), timestamp(t), signature(s) { } 
+    std::string sig_blob() const {
+        msgpack::zone z;
+
+        proto::sig_blob sb;
+        sb.k = util::b58encode_h(key); // k: key
+        sb.v = value; // v: value
+        sb.i = util::b58encode_h(origin.id); // i: origin ID
+        sb.t = timestamp; // t: timestamp
+
+        std::stringstream ss;
+        msgpack::pack(ss, sb);
+
+        return ss.str();
+    }
 };
 
 class node {
@@ -26,10 +44,16 @@ public:
     using basic_callback = std::function<void(peer)>;
     using bucket_callback = std::function<void(peer, bucket)>;
     using find_value_callback = std::function<void(peer, fv_value)>;
+    using pub_key_callback = std::function<void(peer, std::string)>;
 
     basic_callback basic_nothing = [](peer) { };
 
     node(u16);
+
+    void run();
+    void run(std::string, std::string);
+    void export_keypair(std::string, std::string);
+
     ~node();
 
     proto::status put(std::string, std::string);
@@ -41,19 +65,25 @@ public:
     void iter_store(std::string, std::string);
     bucket iter_find_node(hash_t);
     fv_value iter_find_value(std::string);
+    void pub_key(peer, pub_key_callback, basic_callback);
     
     std::list<fv_value> disjoint_lookup(bool, hash_t);
 
 private:
     using fut_t = std::tuple<peer, fv_value>;
-    
+
     struct djc {
         std::mutex mutex;
         std::list<peer> shortlist;
     };
-    
+
+    void _run();
+
     std::future<fut_t> _lookup(bool, peer, hash_t);
+    std::future<std::string> _pub_key(peer);
+    
     fv_value lookup(bool, std::deque<peer>, boost::optional<std::shared_ptr<djc>>, hash_t);
+    fv_value lp_lookup(hash_t, int);
 
     void refresh(tree*);
     void republish(kv);
@@ -68,8 +98,11 @@ private:
     void handle_store(peer, proto::message);
     void handle_find_node(peer, proto::message);
     void handle_find_value(peer, proto::message);
+    void handle_pub_key(peer, proto::message);
 
     hash_t id;
+
+    std::atomic_bool running;
 
     network net;
     
@@ -80,10 +113,13 @@ private:
     std::unordered_map<hash_t, kv> ht;
 
     std::random_device rd;
-    std::default_random_engine reng;
+    hash_reng_t reng;
 
     std::thread refresh_thread;
     std::thread republish_thread;
+
+public:
+    pki::crypto crypto;
 };
 
 }

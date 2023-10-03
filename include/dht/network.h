@@ -42,7 +42,7 @@ class network {
 public:
     using m_callback = std::function<void(peer, proto::message)>;
 
-    network(u16, m_callback, m_callback, m_callback, m_callback);
+    network(u16, m_callback, m_callback, m_callback, m_callback, m_callback);
     ~network();
 
     void run();
@@ -57,7 +57,7 @@ public:
         msg.s = proto::schema_version; // s: schema
         msg.m = m; // m: message type
         msg.a = a; // a: action
-        msg.i = util::htos(i); // i: serialized ID
+        msg.i = util::b58encode_h(i); // i: serialized ID
         msg.q = q; // q: message ID
         msg.d = msgpack::object(d, z); // d: action-specific data
         
@@ -76,6 +76,7 @@ public:
     b_callback b_nothing = [](boost::system::error_code, std::size_t) { };
 
     msg_queue queue;
+    u16 port;
     
 private:
     void handle(std::string, udp::endpoint);
@@ -84,10 +85,10 @@ private:
     m_callback handle_store;
     m_callback handle_find_node;
     m_callback handle_find_value;
+    m_callback handle_pub_key;
 
     boost::asio::io_context ioc;
     std::thread ioc_thread;
-    u16 port;
     udp::socket socket;
     udp::endpoint endpoint;
 };

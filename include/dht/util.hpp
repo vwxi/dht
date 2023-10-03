@@ -29,15 +29,22 @@
 #define BOOST_BIND_NO_PLACEHOLDERS
 
 #include <boost/asio.hpp>
-#include <boost/uuid/detail/sha1.hpp>
 #include <boost/optional.hpp>
 #include <boost/variant.hpp>
 #include <boost/thread/shared_mutex.hpp>
 #include <boost/thread/shared_lock_guard.hpp>
 
-#include <msgpack.hpp>
+#include <boost/multiprecision/cpp_int.hpp>
+#include <boost/random.hpp>
 
+#include "msgpack.hpp"
 #include "spdlog/spdlog.h"
+#include "cryptopp/rsa.h"
+#include "cryptopp/sha.h"
+#include "cryptopp/pssr.h"
+#include "cryptopp/osrng.h"
+#include "cryptopp/hex.h"
+#include "cryptopp/files.h"
 
 #define LOCK(m) std::lock_guard<std::mutex> l(m);
 #define R_LOCK(m) boost::shared_lock<boost::shared_mutex> l(m);
@@ -53,29 +60,18 @@ typedef std::uint8_t u8;
 
 using boost::asio::ip::udp;
 using boost::asio::ip::tcp;
-using boost::uuids::detail::sha1;
 using boost::asio::deadline_timer;
 using namespace std::chrono;
 using namespace std::placeholders;
 using rand_eng = std::uniform_int_distribution<u32>;
-
-template<std::size_t N>
-bool operator<(const std::bitset<N>& x, const std::bitset<N>& y)
-{
-    for (int i = N-1; i >= 0; i--) {
-        if (x[i] ^ y[i]) return y[i];
-    }
-    return false;
-}
 
 namespace dht {
 
 namespace proto {
 
 const int magic_length = 4; // magic length in bytes
-const int hash_width = 5; // hash width in unsigned ints
 const int bucket_size = 20; // number of entries in k-buckets (k=20)
-const int bit_hash_width = 160; // hash width in bits
+const int bit_hash_width = 256; // hash width in bits
 const int missed_pings_allowed = 3; // number of missed pings allowed
 const int missed_messages_allowed = 3; // number of missed messages allowed
 const int net_timeout = 10; // number of seconds until timeout
@@ -87,26 +83,28 @@ const int republish_time = 86400; // number of seconds until a key-value pair ex
 const int refresh_interval = 600; // when to refresh buckets older than refresh_time, in seconds
 const int republish_interval = 86400; // when to republish data older than an republish_time, in seconds
 const int disjoint_paths = 3; // number of disjoint paths to take for lookups
+const int key_size = 2048; // size of public/private keys in bytes
 
 }
 
-typedef std::bitset<proto::bit_hash_width> hash_t;
+typedef boost::multiprecision::number<
+    boost::multiprecision::cpp_int_backend<
+        proto::bit_hash_width, 
+        proto::bit_hash_width, 
+        boost::multiprecision::unsigned_magnitude, 
+        boost::multiprecision::unchecked, 
+        void>, 
+    boost::multiprecision::et_off> hash_t;
 
-typedef u32 id_t[proto::hash_width];
+typedef boost::random::independent_bits_engine<
+    boost::mt19937, 
+    proto::bit_hash_width, 
+    hash_t> hash_reng_t;
 
 namespace util { // utilities
 
 static u64 time_now() {
     return duration_cast<seconds>(system_clock::now().time_since_epoch()).count();
-}
-
-inline void hash_combine(std::size_t& seed) { }
-
-template <typename T, typename... Rest>
-inline void hash_combine(std::size_t& seed, const T& v, Rest... rest) {
-    std::hash<T> hasher;
-    seed ^= hasher(v) + 0x9e3779b9 + (seed<<6) + (seed>>2);
-    hash_combine(seed, rest...);
 }
 
 template<typename ... Args>
@@ -121,51 +119,11 @@ static std::string string_format( const std::string& format, Args ... args )
 }
 
 static std::string htos(hash_t h) {
-    std::vector<unsigned char> bytes((h.size() + 7) / 8);
-    for (size_t i = 0; i < h.size(); ++i) {
-        if (h.test(i)) {
-            bytes[i / 8] |= 1 << (i % 8);
-        }
-    }
-
     std::stringstream ss;
     ss << std::hex;
-
-    for (auto b = bytes.rbegin(); b != bytes.rend(); ++b) {
-        ss << std::setw(2) << std::setfill('0') << static_cast<int>(*b);
-    }
-
+    ss << "0x";
+    ss << h;
     return ss.str();
-}
-
-static hash_t htob(id_t h) {
-    hash_t b(0), t(0);
-    const u64 sh = sizeof(unsigned int) << 3;
-    
-    b |= hash_t(h[4]); b <<= sh;
-    b |= hash_t(h[3]); b <<= sh;
-    b |= hash_t(h[2]); b <<= sh;
-    b |= hash_t(h[1]); b <<= sh;
-    b |= hash_t(h[0]);
-
-    return b;
-}
-
-static void btoh(hash_t b, id_t& h) {
-    const u64 sh = 32;
-    hash_t s(0xffffffff);
-
-    h[0] = (b & s).to_ulong(); b >>= sh;
-    h[1] = (b & s).to_ulong(); b >>= sh;
-    h[2] = (b & s).to_ulong(); b >>= sh;
-    h[3] = (b & s).to_ulong(); b >>= sh;
-    h[4] = (b & s).to_ulong(); b >>= sh;
-}
-
-static void msg_id(std::default_random_engine& reng, id_t& h) {
-    std::uniform_int_distribution<unsigned int> uid;
-
-    std::generate(std::begin(h), std::end(h), [&]() { return uid(reng); });
 }
 
 static u64 msg_id() {
@@ -175,27 +133,8 @@ static u64 msg_id() {
     return r;
 }
 
-static hash_t gen_id(std::default_random_engine& reng) {
-    id_t id;
-    msg_id(reng, id);
-    return htob(id);
-}
-
-static std::string to_bin(std::string hex) {
-    const std::unordered_map<char, std::string> t = {
-        { '0', "0000" }, { '1', "0001" }, { '2', "0010" }, { '3', "0011" }, 
-        { '4', "0100" }, { '5', "0101" }, { '6', "0110" }, { '7', "0111" }, 
-        { '8', "1000" }, { '9', "1001" }, { 'A', "1010" }, { 'B', "1011" }, 
-        { 'C', "1100" }, { 'D', "1101" }, { 'E', "1110" }, { 'F', "1111" }
-    };
-
-    std::string r;
-    for(auto i : hex)
-        try {
-            r += t.at(std::toupper(i));
-        } catch (std::exception&) { throw std::invalid_argument("to_bin: bad hex string"); }
-
-    return r;
+static hash_t gen_id(hash_reng_t& reng) {
+    return reng();
 }
 
 // http://www.hackersdelight.org/hdcodetxt/crc.c.txt
@@ -217,18 +156,127 @@ static unsigned int crc32b(unsigned char *message) {
    return ~crc;
 }
 
-static hash_t sha1(std::string s) {
-    boost::uuids::detail::sha1 sha1;
-    id_t h;
-    sha1.process_bytes(s.c_str(), s.size());
-    sha1.get_digest(h);
-    return util::htob(h);
+static hash_t hash(std::string s) {
+    std::stringstream ss;
+    ss << "0x"; // hacky but required for hex->int
+
+    CryptoPP::HexEncoder he(new CryptoPP::FileSink(ss));
+
+    std::string digest;
+    CryptoPP::SHA256 h;
+
+    h.Update((const CryptoPP::byte*)s.data(), s.size());
+    digest.resize(h.DigestSize() + 2); // hacky
+    h.Final((CryptoPP::byte*)&digest[2]);
+
+    (void)CryptoPP::StringSource(digest, true, new CryptoPP::Redirector(he));
+
+    return hash_t(ss.str());
 }
 
-template <typename M, typename F, typename... Args>
-static auto lock_fn(M& mut, F&& fn, Args&&... args) {
-    LOCK(mut);
-    return std::forward<F>(fn)(std::forward<Args>(args)...);
+// most of the base58 code is ripped from https://bitcoin.stackexchange.com/a/96359
+// i removed the unnecessary abstractions so we can just get string in string out
+
+static const char b58map[] = {
+  '1', '2', '3', '4', '5', '6', '7', '8',
+  '9', 'A', 'B', 'C', 'D', 'E', 'F', 'G',
+  'H', 'J', 'K', 'L', 'M', 'N', 'P', 'Q',
+  'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y',
+  'Z', 'a', 'b', 'c', 'd', 'e', 'f', 'g',
+  'h', 'i', 'j', 'k', 'm', 'n', 'o', 'p',
+  'q', 'r', 's', 't', 'u', 'v', 'w', 'x',
+  'y', 'z' };
+
+static const u8 alphamap[] = {
+  0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+  0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+  0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+  0xff, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+  0xff, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0xff, 0x11, 0x12, 0x13, 0x14, 0x15, 0xff,
+  0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20, 0xff, 0xff, 0xff, 0xff, 0xff,
+  0xff, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2a, 0x2b, 0xff, 0x2c, 0x2d, 0x2e,
+  0x2f, 0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0xff, 0xff, 0xff, 0xff, 0xff };
+
+// encode string into base58. used for signatures
+static std::string b58encode_s(const std::string& data) {
+    std::vector<u8> digits((data.size() * 138 / 100) + 1);
+    size_t digitslen = 1;
+    std::string result;
+
+    for(size_t i = 0; i < data.size(); i++) {
+        u32 carry = static_cast<u32>(data[i]);
+        for(size_t j = 0; j < digitslen; j++) {
+            carry = carry + static_cast<uint32_t>(digits[j] << 8);
+            digits[j] = static_cast<u8>(carry % 58);
+            carry /= 58;
+        }
+        
+        for(; carry; carry /= 58)
+            digits[digitslen++] = static_cast<u8>(carry % 58);
+    }
+  
+    for(size_t i = 0; i < (data.size() - 1) && !data[i]; i++)
+        result.push_back(b58map[0]);
+
+    for(size_t i = 0; i < digitslen; i++)
+        result.push_back(b58map[digits[digitslen - 1 - i]]);
+
+    return result;
+}
+
+// decode base58 into string. used for signatures
+static std::string b58decode_s(const std::string& data) {
+    std::vector<u8> result((data.size() * 138 / 100) + 1);
+    
+    size_t resultlen = 1;
+    for(size_t i = 0; i < data.size(); i++) {
+        uint32_t carry = static_cast<uint32_t>(alphamap[data[i] & 0x7f]);
+    
+        for(size_t j = 0; j < resultlen; j++, carry >>= 8) {
+            carry += static_cast<uint32_t>(result[j] * 58);
+            result[j] = static_cast<uint8_t>(carry);
+        }
+    
+        for (; carry; carry >>= 8)
+            result[resultlen++] = static_cast<uint8_t>(carry);
+    }
+
+    result.resize(resultlen);
+    for(size_t i = 0; i < (data.size() - 1) && data[i] == b58map[0]; i++)
+        result.push_back(0);
+
+    std::reverse(result.begin(), result.end());
+
+    std::string res(result.begin(), result.end());
+    return res;
+}
+
+// encode hash into base58 (https://learnmeabitcoin.com/technical/base58)
+static std::string b58encode_h(hash_t h) {
+    std::deque<char> result;
+    while(h > 0) {
+        int remainder = (h % 58).convert_to<int>();
+        result.push_front(b58map[remainder]);
+        h /= 58;
+    }
+
+    std::string res(result.begin(), result.end());
+    return res;
+}
+
+// decode base58 into hash (https://learnmeabitcoin.com/technical/base58)
+static hash_t b58decode_h(std::string s) {
+    hash_t result = 0;
+    
+    for(std::size_t i = 0; i != s.size(); i++) {
+        const char* p = std::strchr(b58map, s[i]);
+        if(p == NULL)
+            throw std::runtime_error("invalid base58 character");
+
+        result = result * 58 + (p - b58map);
+    }
+
+    return result;
 }
 
 }

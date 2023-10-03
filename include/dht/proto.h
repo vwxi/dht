@@ -11,6 +11,7 @@ struct peer {
     std::string addr;
     u16 port;
     int staleness;
+    boost::optional<std::string> pub_key;
 
     peer() = default;
     peer(hash_t id_) : id(id_) { }
@@ -18,7 +19,7 @@ struct peer {
     peer(std::string a, u16 p) : addr(a), port(p), staleness(0), id(0) { }
     udp::endpoint endpoint() const { return udp::endpoint{boost::asio::ip::address::from_string(addr), port}; }
     bool operator==(const peer& rhs) const { return !addr.compare(rhs.addr) && port == rhs.port; }
-    std::string operator()() { return fmt::format("{}:{}:{}", addr, port, util::htos(id)); }
+    std::string operator()() { return fmt::format("{}:{}:{}", addr, port, util::b58encode_h(id)); }
 };
 
 namespace proto { // protocol
@@ -29,7 +30,8 @@ enum actions {
     ping = 0,
     store = 1,
     find_node = 2,
-    find_value = 3
+    find_value = 3,
+    pub_key = 4
 };
 
 enum type {
@@ -49,15 +51,16 @@ struct peer_object {
     MSGPACK_DEFINE_MAP(a, p, i);
     peer_object() { }
     peer_object(std::string a_, int p_, std::string i_) : a(a_), p(p_), i(i_) { }
-    peer_object(peer p_) : a(p_.addr), p(p_.port), i(util::htos(p_.id)) { }
-    peer to_peer() const { return peer(a, p, hash_t(util::to_bin(i))); }
+    peer_object(peer p_) : a(p_.addr), p(p_.port), i(util::b58encode_h(p_.id)) { }
+    peer to_peer() const { return peer(a, p, util::b58decode_h(i)); }
 };
 
 struct stored_data {
     std::string v;
     peer_object o;
     u64 t;
-    MSGPACK_DEFINE_MAP(v, o, t);
+    std::string s;
+    MSGPACK_DEFINE_MAP(v, o, t, s);
 };
 
 struct find_query_data {
@@ -71,7 +74,9 @@ struct store_query_data {
     std::string k;
     std::string v;
     boost::optional<peer_object> o;
-    MSGPACK_DEFINE_MAP(k, v, o);
+    u64 t;
+    std::string s;
+    MSGPACK_DEFINE_MAP(k, v, o, t, s);
 };
 
 struct store_resp_data {
@@ -95,6 +100,13 @@ struct find_value_resp_data {
     MSGPACK_DEFINE_MAP(v, b);
 };
 
+// pub_key
+
+struct pub_key_resp_data {
+    std::string k;
+    MSGPACK_DEFINE_MAP(k);
+};
+
 struct message {
     int s;
     int m;
@@ -103,6 +115,16 @@ struct message {
     u64 q;
     msgpack::object d;
     MSGPACK_DEFINE_MAP(s, m, a, i, q, d);
+};
+
+// sig blob
+
+struct sig_blob {
+    std::string k;
+    std::string v;
+    std::string i;
+    u64 t;
+    MSGPACK_DEFINE_MAP(k, v, i, t);
 };
 
 }
