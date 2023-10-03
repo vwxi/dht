@@ -83,6 +83,7 @@ private:
     std::future<std::string> _pub_key(peer);
     
     fv_value lookup(bool, std::deque<peer>, boost::optional<std::shared_ptr<djc>>, hash_t);
+    fv_value lp_lookup(hash_t, int);
 
     void refresh(tree*);
     void republish(kv);

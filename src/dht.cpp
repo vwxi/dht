@@ -516,6 +516,149 @@ node::fv_value node::lookup(
     return res;
 }
 
+// haven't adapted for disjoint lookups yet
+// https://github.com/libp2p/specs/blob/master/kad-dht/README.md#value-retrieval
+node::fv_value node::lp_lookup(hash_t key, int Q) {
+    int cnt = 0;
+    std::atomic_int pending{0};
+    kv best;
+    bool best_empty = true;
+    std::deque<peer> pb, pq, pn, po;
+
+    // search for key in local store, if `Q` == 0 or 1, the search is complete
+    {
+        LOCK(ht_mutex);
+        auto it = ht.find(key);
+
+        if(it != ht.end() && Q < 2) {
+            spdlog::debug("Q<2, found in local store, returning.");
+            return it->second;
+        } else if(it != ht.end()) {
+            // otherwise, we count it as one of the values
+            
+            cnt++;
+            best = it->second;
+            spdlog::debug("found already in local store, adding to values.");
+        }
+    }
+
+    // seed `pn` with `a` peers
+    pn = table->find_alpha(peer(key));
+
+    // start iterative search
+    while(true) {
+        // if we've collected `Q` or more answers, return `best`.
+        // if there are no requests pending and `pn` is empty, return `best`.
+        if(cnt >= Q || (pending == 0 && pn.empty())) {
+            spdlog::debug("quorum reached. sending stores to outdated nodes.");
+
+            // storing `best` at `po` nodes
+            for(auto p : po) {
+                spdlog::debug("storing best value at {}", p());
+                store(false, p, best, basic_nothing, basic_nothing);
+            }
+
+            return best;
+        }
+
+        std::list<std::future<fut_t>> tasks;
+
+        // send `alpha` `pn` peers a find_value
+        int n = 0;
+        for(auto p = pn.begin(); p != pn.end() && n < proto::alpha; p++, n++) {
+            // `pending` should never be larger than `alpha`
+            pending++;
+            tasks.push_back(_lookup(true, *p, key));
+            spdlog::debug("querying {}...", (*p)());
+
+            // mark it as queried in `pq`
+            pq.push_back(*p);
+        }
+
+        for(auto&& t : tasks) {
+            pending--;
+
+            fut_t f = t.get();
+            peer p = std::get<0>(f);
+            fv_value v = std::get<1>(f);
+
+            // for loop is in order of pn, not in terms of arrival. this is ok?
+            pn.pop_front();
+
+            // if an error or timeout occurs, discard it
+            if(v.type() == typeid(boost::blank)) {
+                spdlog::debug("timeout/error from {}, discarding.", p());        
+                continue;
+            }
+
+            spdlog::debug("message back from {} ->", p());
+
+            // if without value, add not already queried/to be queried closest nodes to `pn`
+            if(v.type() == typeid(bucket)) {
+                spdlog::debug("\treceived bucket, adding unvisited peers ->");
+                for(auto p_ : boost::get<bucket>(v)) {
+                    if(std::count(pq.begin(), pq.end(), p_) == 0 &&
+                        std::count(pn.begin(), pn.end(), p_) == 0) {
+                        spdlog::debug("\t\tpeer {}", p_());
+                        pn.push_back(p_);
+                    }
+                }
+            }
+
+            // if we receive a value,
+            else if(v.type() == typeid(kv)) {
+                kv kv_ = boost::get<kv>(v);
+                cnt++;
+
+                spdlog::debug("\treceived value ->");
+
+                // if this is the first value we've seen, 
+                // store it in `best` and store peer in `pb` (best peer list)
+                if(best_empty) {
+                    spdlog::debug("\t\tfirst value received, adding to best.");
+                    best_empty = false;
+                    best = kv_;
+                    pb.push_back(p);
+                } else {
+                    // otherwise, we resolve the conflict by calling validator
+
+                    spdlog::debug("\t\tresolving conflict with validator ->");
+                    // select newest and most valid between `best` and this value.
+                    // if equal(?) just add peer to `pb`
+                    if(crypto.validate(kv_) && kv_.timestamp >= best.timestamp) {
+                        // if new value is equal just add to `pb`
+                        if(kv_.timestamp == best.timestamp) {
+                            spdlog::debug("\t\t\tnew value is equal to best, adding peer to pb.");
+                            pb.push_back(p);
+                        }
+                        
+                        // if new value wins, mark all peers in `pb` as 
+                        // outdated (empty `pb` into `po`) and set new peer as `best`
+                        // and also add it to `pb`
+                        else {
+                            spdlog::debug("\t\t\tnew value wins, marking peers as outdated ->");
+
+                            for(auto o : pb) {
+                                spdlog::debug("\t\t\t\tmarking peer {} as outdated", o());
+                                po.push_back(o);
+                            }
+                            
+                            spdlog::debug("\t\t\tclearing pb, setting new value as best, pushing peer to pb");
+                            pb.clear();
+                            best = kv_;
+                            pb.push_back(p);
+                        }
+                    } else {
+                        // if new value loses, add current peer to `po`
+                        spdlog::debug("\t\t\tnew value lost, adding current peer to po");
+                        po.push_back(p);
+                    }
+                }
+            }
+        }
+    }
+}
+
 std::list<node::fv_value> node::disjoint_lookup(bool fv, hash_t target_id) {
     std::deque<peer> initial = table->find_alpha(peer(target_id));
     std::shared_ptr<djc> claimed = std::make_shared<djc>();

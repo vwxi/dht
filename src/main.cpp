@@ -52,6 +52,7 @@ int main(int argc, char** argv) {
             n.ping(peer(argv[3], std::atoi(argv[4])), 
                 [&](peer) {
                     node::fv_value v = n.iter_find_value("hihi");
+                    
                     spdlog::info("iter_find_value ->");
                     if(v.type() == typeid(bucket)) {
                         spdlog::info("\tno value found, bucket instead:");
