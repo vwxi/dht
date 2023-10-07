@@ -10,8 +10,8 @@ as defined in `include/dht/util.hpp` and `include/dht/proto.h`:
 - hash width in u32s (`u32_hash_width`) (default: 5)
 - number of peer entries allowed in one bucket (`bucket_size`) (default: 20)
 - hash width in bits (`bit_hash_width`) (default: 256)
-- number of missed pings allowed (`missed_pings_allowed`) (default: 3) (CHANGE!)
-- number of missed messages allowed (`missed_messages_allowed`) (default: 3) (CHANGE!)
+- number of missed pings allowed (`missed_pings_allowed`) (default: 3)
+- number of missed messages allowed (`missed_messages_allowed`) (default: 3)
 - number of seconds until timeout (`net_timeout`) (default: 10) (CHANGE!)
 - number of candidate peers allowed in replacement cache (`repl_cache_size`) (default: 3)
 - max data size in bytes (`max_data_size`) (default: 65535)
@@ -22,6 +22,7 @@ as defined in `include/dht/util.hpp` and `include/dht/proto.h`:
 - number of seconds between key-value republications (`refresh_interval`) (default: 86400)
 - number of disjoint paths to take for lookups (`disjoint_paths`) (default: 3)
 - size of public/private keys in bytes (`key_size`) (default: 2048)
+- quorum for alternative lookups (`quorum`) (default: 3)
 
 ## messages
 

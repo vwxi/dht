@@ -74,7 +74,7 @@ int main(int argc, char** argv) {
             n.run();
             n.join(peer(argv[3], std::atoi(argv[4])),
                 [&](peer) { 
-                    std::list<node::fv_value> paths = n.disjoint_lookup(true, util::hash("hihi"));
+                    std::list<node::fv_value> paths = n.disjoint_lp_lookup(util::hash("hihi"));
                     for(const auto& p : paths) {
                         spdlog::info("disjoint path ->");
                         if(p.type() == typeid(bucket)) {

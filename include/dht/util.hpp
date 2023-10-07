@@ -84,6 +84,7 @@ const int refresh_interval = 600; // when to refresh buckets older than refresh_
 const int republish_interval = 86400; // when to republish data older than an republish_time, in seconds
 const int disjoint_paths = 3; // number of disjoint paths to take for lookups
 const int key_size = 2048; // size of public/private keys in bytes
+const int quorum = 3; // quorum for alternative lookup procedure (lp_lookup)
 
 }
 

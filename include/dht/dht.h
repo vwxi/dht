@@ -66,8 +66,6 @@ public:
     bucket iter_find_node(hash_t);
     fv_value iter_find_value(std::string);
     void pub_key(peer, pub_key_callback, basic_callback);
-    
-    std::list<fv_value> disjoint_lookup(bool, hash_t);
 
 private:
     using fut_t = std::tuple<peer, fv_value>;
@@ -77,14 +75,76 @@ private:
         std::list<peer> shortlist;
     };
 
+    using lkp_t = std::function<fv_value(std::deque<peer>, std::shared_ptr<djc>, int)>;
+
     void _run();
 
     std::future<fut_t> _lookup(bool, peer, hash_t);
     std::future<std::string> _pub_key(peer);
     
     fv_value lookup(bool, std::deque<peer>, boost::optional<std::shared_ptr<djc>>, hash_t);
-    fv_value lp_lookup(hash_t, int);
+    fv_value lp_lookup(std::deque<peer>, boost::optional<std::shared_ptr<djc>>, hash_t, int);
 
+    std::list<node::fv_value> _disjoint_lookup(
+        bool fv, 
+        hash_t target_id, 
+        lkp_t task,
+        int Q) {
+        std::deque<peer> initial = table->find_alpha(peer(target_id));
+        std::shared_ptr<djc> claimed = std::make_shared<djc>();
+        std::list<fv_value> paths;
+        std::list<std::future<fv_value>> tasks;
+
+        int i = 0;
+
+        // we cant do anything
+        if(initial.size() < proto::disjoint_paths)
+            return paths;
+
+        int num_to_slice = initial.size() / proto::disjoint_paths;
+
+        while(i++ < proto::disjoint_paths) {
+            int n = 0;
+            std::deque<peer> shortlist;
+
+            while(n++ < num_to_slice) {
+                shortlist.push_back(initial.front());
+                initial.pop_front();
+            }
+
+            tasks.push_back(std::async(std::launch::async, task, shortlist, claimed, Q));
+        }
+
+        for(auto&& t : tasks)
+            paths.push_back(t.get());
+
+        return paths;
+    }
+
+public:
+    template <typename... Args>
+    std::list<fv_value> disjoint_lookup(bool fv, hash_t key) {
+        lkp_t f = [this, fv, key] (
+            std::deque<peer> shortlist, std::shared_ptr<djc> claimed, int) -> fv_value {
+                return lookup(fv, shortlist, claimed, key);
+            };
+            
+        // Q ignored
+        return _disjoint_lookup(fv, key, f, 1);
+    }
+
+    template<typename... Args>
+    std::list<fv_value> disjoint_lp_lookup(hash_t key) {
+        lkp_t f = [this, key] (
+            std::deque<peer> shortlist, std::shared_ptr<djc> claimed, int Q) -> fv_value {
+                return lp_lookup(shortlist, claimed, key, Q);
+            };
+        
+        // fv ignored
+        return _disjoint_lookup(true, key, f, proto::quorum);
+    }
+
+private:
     void refresh(tree*);
     void republish(kv);
 

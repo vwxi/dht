@@ -438,9 +438,7 @@ node::fv_value node::lookup(
                     claimed.get()->shortlist.end(), 
                     f) == 0) {
                     // we add to claimed list
-                    if(claimed.has_value()) {
-                        claimed.get()->shortlist.push_back(f);
-                    }
+                    claimed.get()->shortlist.push_back(f);
 
                     // add lookup
                     tasks.push_back(_lookup(fv, f, target_id));
@@ -516,9 +514,12 @@ node::fv_value node::lookup(
     return res;
 }
 
-// haven't adapted for disjoint lookups yet
 // https://github.com/libp2p/specs/blob/master/kad-dht/README.md#value-retrieval
-node::fv_value node::lp_lookup(hash_t key, int Q) {
+node::fv_value node::lp_lookup(
+    std::deque<peer> starting_list,
+    boost::optional<std::shared_ptr<djc>> claimed,
+    hash_t key, 
+    int Q) {
     int cnt = 0;
     std::atomic_int pending{0};
     kv best;
@@ -543,7 +544,7 @@ node::fv_value node::lp_lookup(hash_t key, int Q) {
     }
 
     // seed `pn` with `a` peers
-    pn = table->find_alpha(peer(key));
+    pn = starting_list;
 
     // start iterative search
     while(true) {
@@ -565,15 +566,42 @@ node::fv_value node::lp_lookup(hash_t key, int Q) {
 
         // send `alpha` `pn` peers a find_value
         int n = 0;
-        for(auto p = pn.begin(); p != pn.end() && n < proto::alpha; p++, n++) {
+        for(auto p : pn) {
+            if(n++ >= proto::alpha)
+                break;
+
+            // for disjoint path lookups: check if peer appears in any other search
+            if(claimed.has_value()) {
+                LOCK(claimed.get()->mutex);
+                
+                // if not seen already in other paths, add to claimed list
+                if(std::count(
+                    claimed.get()->shortlist.begin(),
+                    claimed.get()->shortlist.end(),
+                    p) == 0) {
+                    claimed.get()->shortlist.push_back(p);
+                    spdlog::debug("disjoint: {} not seen, adding to claimed list", p());
+                } else {
+                    // if seen already, we exclude this "claimed" peer
+                    spdlog::debug("disjoint: {} seen already, excluding, {}", p());
+                    if(n > 0)
+                        n--;
+                    continue;
+                }
+            }
+            
             // `pending` should never be larger than `alpha`
             pending++;
-            tasks.push_back(_lookup(true, *p, key));
-            spdlog::debug("querying {}...", (*p)());
-
+            tasks.push_back(_lookup(true, p, key));
+            spdlog::debug("querying {}...", p());
+            
             // mark it as queried in `pq`
-            pq.push_back(*p);
+            pq.push_back(p);
         }
+
+        // if there's nothing to do, just stop
+        if(tasks.empty())
+            break;
 
         for(auto&& t : tasks) {
             pending--;
@@ -597,8 +625,12 @@ node::fv_value node::lp_lookup(hash_t key, int Q) {
             if(v.type() == typeid(bucket)) {
                 spdlog::debug("\treceived bucket, adding unvisited peers ->");
                 for(auto p_ : boost::get<bucket>(v)) {
+                    // make sure it hasn't been queried,
+                    // isn't already part of the to-query list and
+                    // isn't ourselves 
                     if(std::count(pq.begin(), pq.end(), p_) == 0 &&
-                        std::count(pn.begin(), pn.end(), p_) == 0) {
+                        std::count(pn.begin(), pn.end(), p_) == 0 &&
+                        p_.id != id) {
                         spdlog::debug("\t\tpeer {}", p_());
                         pn.push_back(p_);
                     }
@@ -618,6 +650,14 @@ node::fv_value node::lp_lookup(hash_t key, int Q) {
                     spdlog::debug("\t\tfirst value received, adding to best.");
                     best_empty = false;
                     best = kv_;
+
+                    // obtain public key
+                    std::future<std::string> fs = _pub_key(best.origin);
+                    std::string s = fs.get();
+
+                    // add to keystore/cache
+                    crypto.ks_put(best.origin.id, s);
+
                     pb.push_back(p);
                 } else {
                     // otherwise, we resolve the conflict by calling validator
@@ -646,6 +686,14 @@ node::fv_value node::lp_lookup(hash_t key, int Q) {
                             spdlog::debug("\t\t\tclearing pb, setting new value as best, pushing peer to pb");
                             pb.clear();
                             best = kv_;
+
+                            // obtain public key
+                            std::future<std::string> fs = _pub_key(best.origin);
+                            std::string s = fs.get();
+
+                            // add to keystore/cache
+                            crypto.ks_put(best.origin.id, s);
+
                             pb.push_back(p);
                         }
                     } else {
@@ -657,42 +705,9 @@ node::fv_value node::lp_lookup(hash_t key, int Q) {
             }
         }
     }
+
+    return best;
 }
-
-std::list<node::fv_value> node::disjoint_lookup(bool fv, hash_t target_id) {
-    std::deque<peer> initial = table->find_alpha(peer(target_id));
-    std::shared_ptr<djc> claimed = std::make_shared<djc>();
-    std::list<fv_value> paths;
-    std::list<std::future<fv_value>> tasks;
-
-    int i = 0;
-
-    // we cant do anything
-    if(initial.size() < proto::disjoint_paths)
-        return paths;
-
-    int num_to_slice = initial.size() / proto::disjoint_paths;
-
-    while(i++ < proto::disjoint_paths) {
-        int n = 0;
-        std::deque<peer> shortlist;
-        
-        while(n++ < num_to_slice) {
-            shortlist.push_back(initial.front());
-            initial.pop_front();
-        }
-
-        tasks.push_back(std::async(std::launch::async, [&, this](std::deque<peer> shortlist) {
-            return lookup(fv, shortlist, claimed, target_id);
-        }, shortlist));
-    }
-
-    for(auto&& t : tasks)
-        paths.push_back(t.get());
-
-    return paths;
-}
-
 
 // this is for a new key-value pair
 void node::iter_store(std::string key, std::string value) {
