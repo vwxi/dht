@@ -248,13 +248,18 @@ for recipient, "buckets" are serialized into arrays where each element describes
                 {"a": <IP address>, "p": <UDP port>, "i": <ID> }, 
                 {"a": <IP address>, "p": <UDP port>, "i": <ID> },
                 {"a": <IP address>, "p": <UDP port>, "i": <ID> }
-        ]
+        ],
+        "s": <signature>
 }
 ```
 
-where IP addresses are strings, ports are integers and IDs are enc-strings
+where:
+- IP addresses are strings, ports are integers and IDs are enc-strings
+- the signature signs the encoded `b` object containing the elements
 
 if there are no nearby nodes, the bucket may be empty
+
+***TECHNICAL NOTE:*** if the signature is invalid, remove the peer's public key from the local keystore
 
 #### sequence
 
@@ -284,7 +289,8 @@ if there are no nearby nodes, the bucket may be empty
                 "b": [
                         {"a": "24.30.210.11", "p": 16616, "i": "12JZzN" }, 
                         {"a": "1.1.51.103", "p": 10510, "i": "5NbYrm" }
-                ]
+                ],
+                "s": ff ff ff ff 00 ... 0e 1a f4 3f dd
         }
 }
 ```
@@ -325,7 +331,17 @@ where:
   - origin (peer object)
   - timestamp (64-bit integer)
   - signature (raw data signature identical to that in the `store` message details)
-- nearest nodes (array of nodes if value not found, nil if value found)
+- nearest nodes (bucket object if value is not found, nil if value found), represented as such:
+```
+"b": {
+        "b": [
+                <list of nodes>
+        ],
+        "s" <signature>
+}
+```
+
+as seen above in the `find_node` response.
 
 `find_value` **cannot** return **both** a stored value and a node array, such messages should be rejected
 
@@ -373,16 +389,19 @@ where:
         "q": 103581305802345,
         "d": {
                 "v": nil,
-                "b": [
-                        {"a": "24.30.210.11", "p": 16616, "i": "12JZzN" }, 
-                        {"a": "1.1.51.103", "p": 10510, "i": "5NbYrm" }       
-                ]
+                "b": {
+                        "b": [
+                                {"a": "24.30.210.11", "p": 16616, "i": "12JZzN" }, 
+                                {"a": "1.1.51.103", "p": 10510, "i": "5NbYrm" }       
+                        ],
+                        "s": ff ff ff ff 00 ... 0e 1a f4 3f dd
+                },
         }
 ```
 
 ### pub_key (`0x04`)
 
-this message is very simple. peer queries for public key in X.509(?) key format (used in crypto++).  
+this message is very simple. peer queries for public key in BER(?) key format (used in crypto++).  
 this message does not update the routing table.
 
 #### action-specific data
