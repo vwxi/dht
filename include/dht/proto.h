@@ -89,14 +89,15 @@ struct store_resp_data {
 
 struct find_node_resp_data {
     std::vector<peer_object> b;
-    MSGPACK_DEFINE_MAP(b);
+    std::string s;
+    MSGPACK_DEFINE_MAP(b, s);
 };
 
 // find_value
 
 struct find_value_resp_data {
     boost::optional<stored_data> v;
-    boost::optional<std::vector<peer_object>> b;
+    boost::optional<find_node_resp_data> b;
     MSGPACK_DEFINE_MAP(v, b);
 };
 

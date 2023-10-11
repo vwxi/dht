@@ -46,6 +46,8 @@ public:
     // keystore
     void ks_put(dht::hash_t, std::string);
     boost::optional<RSA::PublicKey> ks_get(dht::hash_t);
+    void ks_del(dht::hash_t);
+    bool ks_has(dht::hash_t);
 
     // validate
     bool validate(dht::kv);

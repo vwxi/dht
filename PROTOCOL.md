@@ -402,21 +402,34 @@ as seen above in the `find_node` response.
 ### pub_key (`0x04`)
 
 this message is very simple. peer queries for public key in BER(?) key format (used in crypto++).  
-this message does not update the routing table.
+this message does not update the routing table.  
+
+this message should be sent to peers before querying for closest nodes or key-value pairs to validate  
+message and key-value signatures.
 
 #### action-specific data
 
-there is no action-specific data for sender  
+sender uses the following format:
+
+```
+"d": {
+        "s": <secret token>
+}
+```
+
 recipient uses the following format:
 
 ```
 "d": {
-        "k": <public key>
+        "k": <public key>,
+        "s": <signature>
 }
 ```
 
 where:
+- secret token is a string of random characters
 - public key is binary data 
+- signature is the signature for the secret token
 
 #### sequence
 

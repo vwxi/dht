@@ -77,6 +77,11 @@ boost::optional<RSA::PublicKey> crypto::ks_get(dht::hash_t h) {
         boost::optional<RSA::PublicKey>(ks[h]) : boost::none;
 }
 
+void crypto::ks_del(dht::hash_t h) {
+    LOCK(ks_mutex);
+    ks.erase(h);
+}
+
 void crypto::ks_put(dht::hash_t h, std::string s) {
     if(s.empty() || ks_get(h).has_value())
         return;
@@ -88,6 +93,11 @@ void crypto::ks_put(dht::hash_t h, std::string s) {
         pk.Load(StringSource(s, true).Ref());
         ks[h] = std::move(pk);
     } catch (std::exception& e) { }
+}
+
+bool crypto::ks_has(dht::hash_t h) {
+    LOCK(ks_mutex);
+    return ks.find(h) != ks.end();
 }
 
 bool crypto::validate(dht::kv vl) {

@@ -81,6 +81,8 @@ private:
 
     std::future<fut_t> _lookup(bool, peer, hash_t);
     std::future<std::string> _pub_key(peer);
+
+    bool acquire_pub_key(peer);
     
     fv_value lookup(bool, std::deque<peer>, boost::optional<std::shared_ptr<djc>>, hash_t);
     fv_value lp_lookup(std::deque<peer>, boost::optional<std::shared_ptr<djc>>, hash_t, int);

@@ -149,9 +149,17 @@ void node::handle_find_node(peer p, proto::message msg) {
         for(auto i : bkt)
             b.push_back(proto::peer_object(i.addr, i.port, util::b58encode_h(i.id)));
 
+        std::stringstream ss;
+        msgpack::pack(ss, b);
+
+        proto::find_node_resp_data resp {
+            .b = std::move(b),
+            .s = crypto.sign(ss.str())
+        };
+
         net.send(false,
             p, proto::type::response, proto::actions::find_node,
-            id, msg.q, proto::find_node_resp_data { .b = std::move(b) },
+            id, msg.q, resp,
             net.queue.q_nothing, net.queue.f_nothing);
 
         table->update(p);
@@ -166,7 +174,6 @@ void node::handle_find_node(peer p, proto::message msg) {
 
         // hacky, repack
         {
-            msgpack::zone z;
             proto::find_node_resp_data d_;
             msgpack::pack(ss, d);
         }
@@ -206,9 +213,17 @@ void node::handle_find_value(peer p, proto::message msg) {
                 for(auto i : bkt)
                     b.push_back(proto::peer_object{i.addr, i.port, util::b58encode_h(i.id)});
 
+                std::stringstream ss;
+                msgpack::pack(ss, b);
+
+                proto::find_node_resp_data resp {
+                    .b = std::move(b),
+                    .s = crypto.sign(ss.str())
+                };
+
                 net.send(false,
                     p, proto::type::response, proto::actions::find_value,
-                    id, msg.q, proto::find_value_resp_data { .v = boost::none, .b = std::move(b) },
+                    id, msg.q, proto::find_value_resp_data { .v = boost::none, .b = resp },
                     net.queue.q_nothing, net.queue.f_nothing);
             }
         }
@@ -317,7 +332,29 @@ void node::find_node(peer p, hash_t target_id, bucket_callback ok, basic_callbac
             for(auto i : b.b)
                 bkt.push_back(peer(i.a, i.p, util::b58decode_h(i.i)));
 
-            ok(p_, std::move(bkt));
+            // verify signature
+            std::stringstream ss;
+            {
+                std::vector<proto::peer_object> po;
+                for(auto i : bkt)
+                    po.push_back(proto::peer_object(i.addr, i.port, util::b58encode_h(i.id)));
+                msgpack::pack(ss, po);
+            }
+
+            auto k = crypto.ks_get(p_.id);
+
+            if(!k.has_value()) {
+                bad(p_);
+                return;
+            }
+
+            if(crypto.verify(k.value(), ss.str(), b.s))
+                ok(p_, std::move(bkt));
+            else {
+                // remove from local keystore if bad
+                crypto.ks_del(p_.id);
+                bad(p_);
+            }
         },
         bad);
 }
@@ -340,10 +377,32 @@ void node::find_value(peer p, hash_t target_id, find_value_callback ok, basic_ca
                 } else if(d.b.has_value()) {
                     bucket bkt(table);
 
-                    for(auto i : d.b.value())
+                    for(auto i : d.b.value().b)
                         bkt.push_back(peer(i.a, i.p, util::b58decode_h(i.i)));
 
-                    ok(p_, std::move(bkt));
+                    // verify signature
+                    std::stringstream ss;
+                    {
+                        std::vector<proto::peer_object> po;
+                        for(auto i : bkt)
+                            po.push_back(proto::peer_object(i.addr, i.port, util::b58encode_h(i.id)));
+                        msgpack::pack(ss, po);
+                    }
+
+                    auto k = crypto.ks_get(p_.id);
+
+                    if(!k.has_value()) {
+                        bad(p_);
+                        return;
+                    }
+
+                    if(crypto.verify(k.value(), ss.str(), d.b.value().s))
+                        ok(p_, std::move(bkt));
+                    else {
+                        // remove from local keystore
+                        crypto.ks_del(p_.id);
+                        bad(p_);
+                    }
                 }
             } else {
                 bad(p_);
@@ -372,10 +431,43 @@ void node::pub_key(peer p, pub_key_callback ok, basic_callback bad) {
         bad);
 }
 
+std::future<std::string> node::_pub_key(peer p) {
+    std::shared_ptr<std::promise<std::string>> prom = std::make_shared<std::promise<std::string>>();
+    std::future<std::string> fut = prom->get_future();
+
+    pub_key(p,
+        [&, prom](peer, std::string s) { prom->set_value(s); },
+        [&, prom](peer) { prom->set_value(""); });
+
+    return fut;
+}
+
+bool node::acquire_pub_key(peer p) {
+    // acquire pubkey if not already got
+    if(!crypto.ks_has(p.id)) {
+        // send pub_key first, if fails to acquire, return bad
+        std::future<std::string> fs = _pub_key(p);
+        std::string s = fs.get();
+
+        if(s.empty())
+            return false;
+
+        // put into local keystore
+        crypto.ks_put(p.id, s);
+    }
+
+    return true;
+}
+
 std::future<node::fut_t> node::_lookup(bool fv, peer p, hash_t target_id) {
     std::shared_ptr<std::promise<fut_t>> prom = std::make_shared<std::promise<fut_t>>();
     std::future<fut_t> fut = prom->get_future();
     
+    if(!acquire_pub_key(p)) {
+        prom->set_value(fut_t{p, fv_value{boost::blank()}});
+        return fut;
+    }
+
     if(fv) {
         find_value(p, target_id,
             [&, prom](peer p_, fv_value v) { prom->set_value(fut_t{std::move(p_), std::move(v)}); }, 
@@ -385,17 +477,6 @@ std::future<node::fut_t> node::_lookup(bool fv, peer p, hash_t target_id) {
             [&, prom](peer p_, bucket v) { prom->set_value(fut_t{std::move(p_), std::move(v)}); },
             [&, prom](peer p_) { prom->set_value(fut_t{std::move(p_), fv_value{boost::blank()}}); });        
     }
-
-    return fut;
-}
-
-std::future<std::string> node::_pub_key(peer p) {
-    std::shared_ptr<std::promise<std::string>> prom = std::make_shared<std::promise<std::string>>();
-    std::future<std::string> fut = prom->get_future();
-
-    pub_key(p,
-        [&, prom](peer, std::string s) { prom->set_value(s); },
-        [&, prom](peer) { prom->set_value(""); });
 
     return fut;
 }
@@ -479,12 +560,7 @@ node::fv_value node::lookup(
                 kv vl = boost::get<kv>(v);
                 store(false, closest_node, vl, basic_nothing, basic_nothing);
 
-                // obtain public key
-                std::future<std::string> fs = _pub_key(vl.origin);
-                std::string s = fs.get();
-
-                // add to keystore/cache
-                crypto.ks_put(vl.origin.id, s);
+                acquire_pub_key(vl.origin);
 
                 return v;
             }
@@ -558,6 +634,8 @@ node::fv_value node::lp_lookup(
                 spdlog::debug("storing best value at {}", p());
                 store(false, p, best, basic_nothing, basic_nothing);
             }
+
+            acquire_pub_key(best.origin);
 
             return best;
         }
@@ -651,13 +729,6 @@ node::fv_value node::lp_lookup(
                     best_empty = false;
                     best = kv_;
 
-                    // obtain public key
-                    std::future<std::string> fs = _pub_key(best.origin);
-                    std::string s = fs.get();
-
-                    // add to keystore/cache
-                    crypto.ks_put(best.origin.id, s);
-
                     pb.push_back(p);
                 } else {
                     // otherwise, we resolve the conflict by calling validator
@@ -686,13 +757,6 @@ node::fv_value node::lp_lookup(
                             spdlog::debug("\t\t\tclearing pb, setting new value as best, pushing peer to pb");
                             pb.clear();
                             best = kv_;
-
-                            // obtain public key
-                            std::future<std::string> fs = _pub_key(best.origin);
-                            std::string s = fs.get();
-
-                            // add to keystore/cache
-                            crypto.ks_put(best.origin.id, s);
 
                             pb.push_back(p);
                         }
