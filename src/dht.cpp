@@ -13,8 +13,9 @@ node::node(u16 port) :
         std::bind(&node::handle_find_value, this, _1, _2),
         std::bind(&node::handle_pub_key, this, _1, _2)),
     reng(rd()),
+    treng(rd()),
     running(false) {
-    std::srand(std::time(NULL));
+    std::srand(util::time_now());
 }
 
 node::~node() {
@@ -110,7 +111,6 @@ void node::handle_store(peer p, proto::message msg) {
         
         try {
             LOCK(ht_mutex);
-            /// @todo GET VALIDATOR TO VALIDATE STORED DATA
             ht[k] = kv(k, d.v, d.o.has_value() ? d.o.value().to_peer() : p, d.t, d.s);
         } catch (std::exception&) { s = proto::status::bad; }
 
@@ -170,13 +170,9 @@ void node::handle_find_node(peer p, proto::message msg) {
 
         msg.d.convert(d);
 
-        std::stringstream ss;
-
         // hacky, repack
-        {
-            proto::find_node_resp_data d_;
-            msgpack::pack(ss, d);
-        }
+        std::stringstream ss;
+        msgpack::pack(ss, d);
 
         net.queue.satisfy(p, msg.q, ss.str());
         
@@ -233,15 +229,10 @@ void node::handle_find_value(peer p, proto::message msg) {
         proto::find_value_resp_data d;
         msg.d.convert(d);
 
-        std::stringstream ss;
-
         // hacky, repack
-        {
-            msgpack::zone z;
-            proto::find_node_resp_data d_;
-            msgpack::pack(ss, d);
-        }
-
+        std::stringstream ss;
+        msgpack::pack(ss, d);
+        
         net.queue.satisfy(p, msg.q, ss.str());
 
         table->update(p);
@@ -250,17 +241,25 @@ void node::handle_find_value(peer p, proto::message msg) {
 
 void node::handle_pub_key(peer p, proto::message msg) {
     if(msg.m == proto::type::query) {
+        proto::pub_key_query_data d;
+        msg.d.convert(d);
+        
         net.send(false,
             p, proto::type::response, proto::actions::pub_key,
             id, msg.q, proto::pub_key_resp_data{
-                .k = crypto.pub_key()
+                .k = crypto.pub_key(),
+                .s = crypto.sign(d.s) // sign secret token
             },
             net.queue.q_nothing, net.queue.f_nothing);
     } else if(msg.m == proto::type::response) {
         proto::pub_key_resp_data d;
         msg.d.convert(d);
 
-        net.queue.satisfy(p, msg.q, d.k);
+        // hacky, repack
+        std::stringstream ss;
+        msgpack::pack(ss, d);
+
+        net.queue.satisfy(p, msg.q, ss.str());
 
         /// @note pub_key does not update table
     }
@@ -341,20 +340,10 @@ void node::find_node(peer p, hash_t target_id, bucket_callback ok, basic_callbac
                 msgpack::pack(ss, po);
             }
 
-            auto k = crypto.ks_get(p_.id);
-
-            if(!k.has_value()) {
-                bad(p_);
-                return;
-            }
-
-            if(crypto.verify(k.value(), ss.str(), b.s))
+            if(crypto.verify(p_.id, ss.str(), b.s))
                 ok(p_, std::move(bkt));
-            else {
-                // remove from local keystore if bad
-                crypto.ks_del(p_.id);
+            else
                 bad(p_);
-            }
         },
         bad);
 }
@@ -389,20 +378,10 @@ void node::find_value(peer p, hash_t target_id, find_value_callback ok, basic_ca
                         msgpack::pack(ss, po);
                     }
 
-                    auto k = crypto.ks_get(p_.id);
-
-                    if(!k.has_value()) {
-                        bad(p_);
-                        return;
-                    }
-
-                    if(crypto.verify(k.value(), ss.str(), d.b.value().s))
+                    if(crypto.verify(p_.id, ss.str(), d.b.value().s))
                         ok(p_, std::move(bkt));
-                    else {
-                        // remove from local keystore
-                        crypto.ks_del(p_.id);
+                    else
                         bad(p_);
-                    }
                 }
             } else {
                 bad(p_);
@@ -416,17 +395,34 @@ void node::find_value(peer p, std::string key, find_value_callback ok, basic_cal
 }
 
 void node::pub_key(peer p, pub_key_callback ok, basic_callback bad) {
+    std::string token = util::gen_token(treng);
+
     net.send(true,
         p, proto::type::query, proto::actions::pub_key,
-        id, util::msg_id(), msgpack::type::nil_t(),
-        [this, ok, bad](peer p_, std::string s) {
-            if(p_.id != util::hash(s)) {
+        id, util::msg_id(), proto::pub_key_query_data {
+            .s = token
+        },
+        [this, ok, bad, token](peer p_, std::string s) {
+            msgpack::object_handle oh;
+            msgpack::unpack(oh, s.data(), s.size());
+            msgpack::object obj = oh.get();
+            proto::pub_key_resp_data d;
+            obj.convert(d);
+
+            if(p_.id != util::hash(d.k)) {
                 // if peer id isn't hash(pkey), it's bad
                 bad(p_);
                 return;
             }
 
-            ok(p_, s);
+            // put into local keystore, will be removed if following verify fails
+            crypto.ks_put(p_.id, d.k);
+
+            // verify if signature for token is correct
+            if(crypto.verify(p_.id, token, d.s))
+                ok(p_, s);
+            else
+                bad(p_);
         },
         bad);
 }
@@ -451,9 +447,6 @@ bool node::acquire_pub_key(peer p) {
 
         if(s.empty())
             return false;
-
-        // put into local keystore
-        crypto.ks_put(p.id, s);
     }
 
     return true;
@@ -817,7 +810,7 @@ void node::refresh(tree* ptr) {
     if(ptr == nullptr) return;
     if(!ptr->leaf) return;
     
-    hash_t randomness = util::gen_id(reng);
+    hash_t randomness = util::gen_randomness(reng);
     hash_t mask = ~hash_t(0) << (proto::bit_hash_width - ptr->prefix.cutoff);
     hash_t random_id = ptr->prefix.prefix | (randomness & ~mask);
     bucket bkt = iter_find_node(random_id);

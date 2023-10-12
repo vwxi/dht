@@ -85,6 +85,7 @@ const int republish_interval = 86400; // when to republish data older than an re
 const int disjoint_paths = 3; // number of disjoint paths to take for lookups
 const int key_size = 2048; // size of public/private keys in bytes
 const int quorum = 3; // quorum for alternative lookup procedure (lp_lookup)
+const int token_length = 32; // length of secret tokens
 
 }
 
@@ -101,6 +102,9 @@ typedef boost::random::independent_bits_engine<
     boost::mt19937, 
     proto::bit_hash_width, 
     hash_t> hash_reng_t;
+
+typedef std::independent_bits_engine<
+    std::default_random_engine, CHAR_BIT, unsigned char> token_reng_t;
 
 namespace util { // utilities
 
@@ -134,8 +138,15 @@ static u64 msg_id() {
     return r;
 }
 
-static hash_t gen_id(hash_reng_t& reng) {
+static hash_t gen_randomness(hash_reng_t& reng) {
     return reng();
+}
+
+static std::string gen_token(token_reng_t& reng) {
+    std::string data;
+    data.resize(proto::token_length);
+    std::generate(data.begin(), data.end(), std::ref(reng));
+    return data;
 }
 
 // http://www.hackersdelight.org/hdcodetxt/crc.c.txt

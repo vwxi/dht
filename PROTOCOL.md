@@ -23,6 +23,7 @@ as defined in `include/dht/util.hpp` and `include/dht/proto.h`:
 - number of disjoint paths to take for lookups (`disjoint_paths`) (default: 3)
 - size of public/private keys in bytes (`key_size`) (default: 2048)
 - quorum for alternative lookups (`quorum`) (default: 3)
+- length of secret tokens (`token_length`) (default: 32)
 
 ## messages
 
@@ -427,7 +428,7 @@ recipient uses the following format:
 ```
 
 where:
-- secret token is a string of random characters
+- secret token is a string of `token_length` random characters
 - public key is binary data 
 - signature is the signature for the secret token
 

@@ -176,6 +176,7 @@ private:
 
     std::random_device rd;
     hash_reng_t reng;
+    token_reng_t treng;
 
     std::thread refresh_thread;
     std::thread republish_thread;

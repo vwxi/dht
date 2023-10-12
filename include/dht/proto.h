@@ -103,9 +103,15 @@ struct find_value_resp_data {
 
 // pub_key
 
+struct pub_key_query_data {
+    std::string s;
+    MSGPACK_DEFINE_MAP(s);
+};
+
 struct pub_key_resp_data {
     std::string k;
-    MSGPACK_DEFINE_MAP(k);
+    std::string s;
+    MSGPACK_DEFINE_MAP(k, s);
 };
 
 struct message {

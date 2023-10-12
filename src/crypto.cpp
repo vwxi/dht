@@ -71,6 +71,22 @@ bool crypto::verify(std::string message, std::string signature) {
     return verify(key_pair.pub_key, message, signature);
 }
 
+bool crypto::verify(dht::hash_t id, std::string message, std::string signature) {
+    auto k = ks_get(id);
+
+    if(!k.has_value()) {
+        return false;
+    }
+
+    bool v = verify(k.value(), message, signature);
+
+    // remove from local keystore
+    if(!v)
+        ks_del(id);
+
+    return v;
+}
+
 boost::optional<RSA::PublicKey> crypto::ks_get(dht::hash_t h) {
     LOCK(ks_mutex);
     return (ks.find(h) != ks.end()) ? 
@@ -101,14 +117,7 @@ bool crypto::ks_has(dht::hash_t h) {
 }
 
 bool crypto::validate(dht::kv vl) {
-    // try local keystore to get key first
-    auto local = ks_get(vl.origin.id);
-
-    if(local.has_value())
-        return verify(local.value(), vl.sig_blob(), vl.signature);
-
-    // we'll call pub_key when we get back a value from lookups?
-    return false;
+    return verify(vl.origin.id, vl.sig_blob(), vl.signature);
 }
 
 }

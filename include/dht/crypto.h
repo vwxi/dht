@@ -42,6 +42,7 @@ public:
     // verify
     bool verify(RSA::PublicKey, std::string, std::string);
     bool verify(std::string, std::string);
+    bool verify(dht::hash_t, std::string, std::string);
 
     // keystore
     void ks_put(dht::hash_t, std::string);
