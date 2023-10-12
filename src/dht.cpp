@@ -265,6 +265,32 @@ void node::handle_pub_key(peer p, proto::message msg) {
     }
 }
 
+/// public interfaces 
+
+void node::put(std::string key, std::string value) {
+    iter_store(key, value);
+}
+
+void node::get(std::string key, value_callback cb) {
+    std::list<fv_value> l = disjoint_lp_lookup(util::hash(key));
+    std::vector<kv> values;
+
+    for(auto i : l) {
+        if(i.type() == typeid(boost::blank) ||
+            i.type() == typeid(bucket))
+            continue;
+        else if(i.type() == typeid(kv)) {
+            kv v = boost::get<kv>(i);
+
+            // get will only fetch valid data
+            if(crypto.validate(v))
+                values.push_back(v);
+        }
+    }
+
+    cb(std::move(values));
+}
+
 /// async actions
 
 void node::ping(peer p, basic_callback ok, basic_callback bad) {

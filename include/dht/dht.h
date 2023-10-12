@@ -17,11 +17,15 @@ struct kv {
     peer origin;
     u64 timestamp;
     std::string signature;
+
     kv() { }
-    kv(hash_t k, const proto::stored_data& s) : 
-        key(k), value(s.v), origin(s.o.to_peer()), timestamp(s.t), signature(s.s) { } 
+
     kv(hash_t k, std::string v, peer o, u64 t, std::string s) : 
         key(k), value(v), origin(o), timestamp(t), signature(s) { } 
+
+    kv(hash_t k, const proto::stored_data& s) : 
+        key(k), value(s.v), origin(s.o.to_peer()), timestamp(s.t), signature(s.s) { } 
+
     std::string sig_blob() const {
         msgpack::zone z;
 
@@ -40,11 +44,8 @@ struct kv {
 
 class node {
 public:
-    using fv_value = boost::variant<boost::blank, kv, bucket>;
     using basic_callback = std::function<void(peer)>;
-    using bucket_callback = std::function<void(peer, bucket)>;
-    using find_value_callback = std::function<void(peer, fv_value)>;
-    using pub_key_callback = std::function<void(peer, std::string)>;
+    using value_callback = std::function<void(std::vector<kv>)>;
 
     basic_callback basic_nothing = [](peer) { };
 
@@ -56,18 +57,16 @@ public:
 
     ~node();
 
-    proto::status put(std::string, std::string);
-    fv_value get(std::string);
+    void put(std::string, std::string);
+    void get(std::string, value_callback);
     
     void join(peer, basic_callback, basic_callback);
 
-    void ping(peer, basic_callback, basic_callback);
-    void iter_store(std::string, std::string);
-    bucket iter_find_node(hash_t);
-    fv_value iter_find_value(std::string);
-    void pub_key(peer, pub_key_callback, basic_callback);
-
 private:
+    using fv_value = boost::variant<boost::blank, kv, bucket>;
+    using bucket_callback = std::function<void(peer, bucket)>;
+    using find_value_callback = std::function<void(peer, fv_value)>;
+    using pub_key_callback = std::function<void(peer, std::string)>;
     using fut_t = std::tuple<peer, fv_value>;
 
     struct djc {
@@ -78,6 +77,12 @@ private:
     using lkp_t = std::function<fv_value(std::deque<peer>, std::shared_ptr<djc>, int)>;
 
     void _run();
+
+    void ping(peer, basic_callback, basic_callback);
+    void iter_store(std::string, std::string);
+    bucket iter_find_node(hash_t);
+    fv_value iter_find_value(std::string);
+    void pub_key(peer, pub_key_callback, basic_callback);
 
     std::future<fut_t> _lookup(bool, peer, hash_t);
     std::future<std::string> _pub_key(peer);
@@ -123,7 +128,6 @@ private:
         return paths;
     }
 
-public:
     template <typename... Args>
     std::list<fv_value> disjoint_lookup(bool fv, hash_t key) {
         lkp_t f = [this, fv, key] (
@@ -146,7 +150,6 @@ public:
         return _disjoint_lookup(true, key, f, proto::quorum);
     }
 
-private:
     void refresh(tree*);
     void republish(kv);
 
