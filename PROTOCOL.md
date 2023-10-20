@@ -69,7 +69,7 @@ there are two types of messages:
 
 #### action
 
-there are four actions:
+these are the actions:
 
 - ping (`0x00`)
 - store (`0x01`)
