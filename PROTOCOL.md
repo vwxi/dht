@@ -53,8 +53,10 @@ one message per client should be handled at any time. a client should not have m
 peer objects are formatted like so:
 
 ```
-{ "a": <address>, "p": <port>, "i": <enc-string> }
+{ "t": <transport>, "a": <address>, "p": <port>, "i": <enc-string> }
 ```
+
+transport is a string, either "udp" or "tcp", denoting transport protocol to be used
 
 #### schema version
 
@@ -76,6 +78,18 @@ these are the actions:
 - find_node (`0x02`)
 - find_value (`0x03`)
 - pub_key (`0x04`)
+
+#### store types
+
+you can store different types of data, which are all handled the same over protocol but  
+can be handled differently:
+
+- data (`0x00`)
+  - this is just raw data, to be interpreted by clients
+- provider record (`0x01`)
+  - this is like a pointer to data, pointing to a peer that will provide this data.
+    the data itself is simply a serialized peer object.
+        
 
 #### enc-string
 
@@ -153,6 +167,7 @@ for sender,
 ```
 "d": {
         "k": <key>,
+        "d": <store type>
         "v": <binary data>
         "o": <origin>
         "t": <timestamp>,
@@ -170,6 +185,7 @@ for recipient,
 
 where:
 - the key (enc-string)
+- store type (see above)
 - binary data (string)
 - origin (peer object or nil)
 - timestamp (64-bit integer timestamp)
@@ -185,6 +201,7 @@ with the following syntax using the origin's private key:
 ```
 {
         "k": <key>,
+        "d": <store type>
         "v": <binary data>,
         "i": <origin's ID ('i' object)>,
         "t": <timestamp>
@@ -203,8 +220,9 @@ with the following syntax using the origin's private key:
         "q": 103581305802345,
         "d": {
                 "k": "5PYPwi",
+                "d": 0,
                 "v": a3 e5 1d 0f 9e ... 6e 77 3a 0e 9f,
-                "o": { "a": "127.0.0.1", "p": 10001, "i": "1vxEC" }
+                "o": { "t": "udp", "a": "127.0.0.1", "p": 10001, "i": "1vxEC" }
                 "t": 15019835313561,
                 "s": ff ff ff ff 00 ... 0e 1a f4 3f dd
         }
@@ -246,9 +264,9 @@ for recipient, "buckets" are serialized into arrays where each element describes
 ```
 "d": {
         "b": [
-                {"a": <IP address>, "p": <UDP port>, "i": <ID> }, 
-                {"a": <IP address>, "p": <UDP port>, "i": <ID> },
-                {"a": <IP address>, "p": <UDP port>, "i": <ID> }
+                {"t": <transport>, "a": <IP address>, "p": <UDP port>, "i": <ID> }, 
+                {"t": <transport>, "a": <IP address>, "p": <UDP port>, "i": <ID> },
+                {"t": <transport>, "a": <IP address>, "p": <UDP port>, "i": <ID> }
         ],
         "s": <signature>
 }
@@ -288,8 +306,8 @@ if there are no nearby nodes, the bucket may be empty
         "q": 103581305802345,
         "d": {
                 "b": [
-                        {"a": "24.30.210.11", "p": 16616, "i": "12JZzN" }, 
-                        {"a": "1.1.51.103", "p": 10510, "i": "5NbYrm" }
+                        {"t": "udp", "a": "24.30.210.11", "p": 16616, "i": "12JZzN" }, 
+                        {"t": "udp", "a": "1.1.51.103", "p": 10510, "i": "5NbYrm" }
                 ],
                 "s": ff ff ff ff 00 ... 0e 1a f4 3f dd
         }
@@ -372,7 +390,7 @@ as seen above in the `find_node` response.
         "d": {
                 "v": {
                         "v": 1e e5 6a 2e 90 ... a0 e4 b7 61 d8,
-                        "o": {"a": "127.0.0.1", "p": 16006, "i": "gaofe"},
+                        "o": {"t": "udp", "a": "127.0.0.1", "p": 16006, "i": "gaofe"},
                         "t": 196182340981,
                         "s": ff ff ff ff 00 ... 0e 1a f4 3f dd
                 },
@@ -392,8 +410,8 @@ as seen above in the `find_node` response.
                 "v": nil,
                 "b": {
                         "b": [
-                                {"a": "24.30.210.11", "p": 16616, "i": "12JZzN" }, 
-                                {"a": "1.1.51.103", "p": 10510, "i": "5NbYrm" }       
+                                {"t": "udp", "a": "24.30.210.11", "p": 16616, "i": "12JZzN" }, 
+                                {"t": "udp", "a": "1.1.51.103", "p": 10510, "i": "5NbYrm" }       
                         ],
                         "s": ff ff ff ff 00 ... 0e 1a f4 3f dd
                 },
