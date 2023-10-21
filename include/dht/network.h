@@ -69,7 +69,7 @@ public:
             queue.await(p, q, ok, bad);
 
         // send
-        socket.async_send_to(boost::asio::buffer(sb.data(), sb.size()), p.endpoint(), b_nothing);
+        socket.async_send_to(boost::asio::buffer(sb.data(), sb.size()), p.u_endpoint(), b_nothing);
     }
 
     using b_callback = std::function<void(boost::system::error_code, std::size_t)>;

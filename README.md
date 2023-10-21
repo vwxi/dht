@@ -31,14 +31,14 @@ int main(int argc, char** argv) {
         {
             node n(std::atoi(argv[2]));
             n.run();
-            n.join(peer(argv[3], std::atoi(argv[4])), n.basic_nothing, n.basic_nothing);
+            n.join(peer("udp", argv[3], std::atoi(argv[4])), n.basic_nothing, n.basic_nothing);
         }
         break;
     case 3: // join and store a value
         {
             node n(std::atoi(argv[2]));
             n.run();
-            n.join(peer(argv[3], std::atoi(argv[4])), 
+            n.join(peer("udp", argv[3], std::atoi(argv[4])), 
                 [&](peer p_) {
                     n.put("hello", "hihi");
                 }, n.basic_nothing);
@@ -48,7 +48,7 @@ int main(int argc, char** argv) {
         {
             node n(std::atoi(argv[2]));
             n.run();
-            n.join(peer(argv[3], std::atoi(argv[4])), 
+            n.join(peer("udp", argv[3], std::atoi(argv[4])), 
                 [&](peer p_) {
                     n.get("hello", [&](std::vector<kv> values) {
                         for(auto i : values)

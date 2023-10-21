@@ -7,6 +7,9 @@ namespace tulip {
 namespace dht {
 
 struct peer {
+    typedef boost::variant<tcp::endpoint, udp::endpoint> endp;
+
+    std::string transport;
     hash_t id;
     std::string addr;
     u16 port;
@@ -15,11 +18,13 @@ struct peer {
 
     peer() = default;
     peer(hash_t id_) : id(id_) { }
-    peer(std::string a, u16 p, hash_t id_) : addr(a), port(p), staleness(0), id(id_) { }
-    peer(std::string a, u16 p) : addr(a), port(p), staleness(0), id(0) { }
-    udp::endpoint endpoint() const { return udp::endpoint{boost::asio::ip::address::from_string(addr), port}; }
-    bool operator==(const peer& rhs) const { return !addr.compare(rhs.addr) && port == rhs.port; }
-    std::string operator()() { return fmt::format("{}:{}:{}", addr, port, util::b58encode_h(id)); }
+    peer(std::string t, std::string a, u16 p, hash_t id_) : transport(t), addr(a), port(p), staleness(0), id(id_) { }
+    peer(std::string t, std::string a, u16 p) : transport(t), addr(a), port(p), staleness(0), id(0) { }
+    tcp::endpoint t_endpoint() const { return tcp::endpoint{boost::asio::ip::address::from_string(addr), port}; }
+    udp::endpoint u_endpoint() const { return udp::endpoint{boost::asio::ip::address::from_string(addr), port}; }
+    endp endpoint() const { return !transport.compare("udp") ? endp(u_endpoint()) : (!transport.compare("tcp") ? endp(t_endpoint()) : endp()); } 
+    bool operator==(const peer& rhs) const { return !transport.compare(rhs.transport) && !addr.compare(rhs.addr) && port == rhs.port; }
+    std::string operator()() { return fmt::format("{}:{}:{}:{}", transport, addr, port, util::b58encode_h(id)); }
 };
 
 namespace proto { // protocol
@@ -45,14 +50,15 @@ enum status {
 };
 
 struct peer_object {
+    std::string t;
     std::string a;
     int p;
     std::string i;
-    MSGPACK_DEFINE_MAP(a, p, i);
+    MSGPACK_DEFINE_MAP(t, a, p, i);
     peer_object() { }
-    peer_object(std::string a_, int p_, std::string i_) : a(a_), p(p_), i(i_) { }
-    peer_object(peer p_) : a(p_.addr), p(p_.port), i(util::b58encode_h(p_.id)) { }
-    peer to_peer() const { return peer(a, p, util::b58decode_h(i)); }
+    peer_object(std::string t_, std::string a_, int p_, std::string i_) : t(t_), a(a_), p(p_), i(i_) { }
+    peer_object(peer p_) : t(p_.transport), a(p_.addr), p(p_.port), i(util::b58encode_h(p_.id)) { }
+    peer to_peer() const { return peer(t, a, p, util::b58decode_h(i)); }
 };
 
 struct stored_data {

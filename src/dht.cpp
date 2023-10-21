@@ -147,7 +147,7 @@ void node::handle_find_node(peer p, proto::message msg) {
 
         std::vector<proto::peer_object> b;
         for(auto i : bkt)
-            b.push_back(proto::peer_object(i.addr, i.port, util::b58encode_h(i.id)));
+            b.push_back(proto::peer_object(i));
 
         std::stringstream ss;
         msgpack::pack(ss, b);
@@ -207,7 +207,7 @@ void node::handle_find_value(peer p, proto::message msg) {
 
                 std::vector<proto::peer_object> b;
                 for(auto i : bkt)
-                    b.push_back(proto::peer_object{i.addr, i.port, util::b58encode_h(i.id)});
+                    b.push_back(proto::peer_object(i));
 
                 std::stringstream ss;
                 msgpack::pack(ss, b);
@@ -355,14 +355,14 @@ void node::find_node(peer p, hash_t target_id, bucket_callback ok, basic_callbac
             bucket bkt(table);
 
             for(auto i : b.b)
-                bkt.push_back(peer(i.a, i.p, util::b58decode_h(i.i)));
+                bkt.push_back(peer(i.t, i.a, i.p, util::b58decode_h(i.i)));
 
             // verify signature
             std::stringstream ss;
             {
                 std::vector<proto::peer_object> po;
                 for(auto i : bkt)
-                    po.push_back(proto::peer_object(i.addr, i.port, util::b58encode_h(i.id)));
+                    po.push_back(proto::peer_object(i));
                 msgpack::pack(ss, po);
             }
 
@@ -393,14 +393,14 @@ void node::find_value(peer p, hash_t target_id, find_value_callback ok, basic_ca
                     bucket bkt(table);
 
                     for(auto i : d.b.value().b)
-                        bkt.push_back(peer(i.a, i.p, util::b58decode_h(i.i)));
+                        bkt.push_back(peer(i.t, i.a, i.p, util::b58decode_h(i.i)));
 
                     // verify signature
                     std::stringstream ss;
                     {
                         std::vector<proto::peer_object> po;
                         for(auto i : bkt)
-                            po.push_back(proto::peer_object(i.addr, i.port, util::b58encode_h(i.id)));
+                            po.push_back(proto::peer_object(i));
                         msgpack::pack(ss, po);
                     }
 
