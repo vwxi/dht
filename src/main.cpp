@@ -1,7 +1,7 @@
 #include "dht.h"
 
 int main(int argc, char** argv) {
-    spdlog::set_level(spdlog::level::info);
+    spdlog::set_level(spdlog::level::debug);
     spdlog::set_pattern("[%P] [%H:%M:%S] [%^%l%$] %v");
     using namespace tulip::dht;
 
@@ -38,8 +38,32 @@ int main(int argc, char** argv) {
                 [&](peer p_) {
                     n.get("hello", [&](std::vector<kv> values) {
                         for(auto i : values)
-                            spdlog::info("value -> data: \"{}\", origin: {}, timestamp: {}", 
+                            spdlog::info("{} -> data: \"{}\", origin: {}, timestamp: {}", 
+                                i.type == proto::store_type::provider_record ? "provider" : "data",
                                 i.value, i.origin(), i.timestamp);
+                    });
+                }, n.basic_nothing);
+        }
+        break;
+    case 5: // join and start providing
+        {
+            node n(std::atoi(argv[2]));
+            n.run();
+            n.join(peer("udp", argv[3], std::atoi(argv[4])), 
+                [&](peer p_) {
+                    n.provide("hello", peer("tcp", "127.0.0.1", std::atoi(argv[2]), n.get_id()));
+                }, n.basic_nothing);
+        }
+        break;
+    case 6: // join and fetch provider(s)
+        {
+            node n(std::atoi(argv[2]));
+            n.run();
+            n.join(peer("udp", argv[3], std::atoi(argv[4])), 
+                [&](peer p_) {
+                    n.get_providers("hello", [&](std::vector<peer> providers) {
+                        for(auto i : providers)
+                            spdlog::info("\tprovider -> {}", i());
                     });
                 }, n.basic_nothing);
         }

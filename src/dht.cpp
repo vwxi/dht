@@ -25,6 +25,10 @@ node::~node() {
     }
 }
 
+hash_t node::get_id() const {
+    return id;
+} 
+
 /// runners
 
 void node::_run() {
@@ -111,7 +115,7 @@ void node::handle_store(peer p, proto::message msg) {
         
         try {
             LOCK(ht_mutex);
-            ht[k] = kv(k, d.v, d.o.has_value() ? d.o.value().to_peer() : p, d.t, d.s);
+            ht[k] = kv(k, d.d, d.v, d.o.has_value() ? d.o.value().to_peer() : p, d.t, d.s);
         } catch (std::exception&) { s = proto::status::bad; }
 
         net.send(false,
@@ -195,6 +199,7 @@ void node::handle_find_value(peer p, proto::message msg) {
                 net.send(false,
                     p, proto::type::response, proto::actions::find_value,
                     id, msg.q, proto::find_value_resp_data{ .v = proto::stored_data{
+                        .d = it->second.type,
                         .v = it->second.value,
                         .o = proto::peer_object(it->second.origin),
                         .t = it->second.timestamp,
@@ -268,7 +273,7 @@ void node::handle_pub_key(peer p, proto::message msg) {
 /// public interfaces 
 
 void node::put(std::string key, std::string value) {
-    iter_store(key, value);
+    iter_store(proto::store_type::data, key, value);
 }
 
 void node::get(std::string key, value_callback cb) {
@@ -289,6 +294,35 @@ void node::get(std::string key, value_callback cb) {
     }
 
     cb(std::move(values));
+}
+
+void node::provide(std::string key, peer provider) {
+    std::stringstream ss;
+    proto::peer_object o(provider);
+    msgpack::pack(ss, o);
+
+    iter_store(proto::store_type::provider_record, key, ss.str());
+}
+
+void node::get_providers(std::string key, prov_callback cb) {
+    get(key, [this, cb](std::vector<kv> values) {
+        std::vector<peer> providers;
+
+        (void)std::remove_if(values.begin(), values.end(), [](const kv& p) { 
+            return p.type != proto::store_type::provider_record;
+        });
+
+        for(auto v : values) {
+            msgpack::object_handle oh;
+            msgpack::unpack(oh, v.value.data(), v.value.size());
+            msgpack::object obj = oh.get();
+            proto::peer_object p;
+            obj.convert(p);
+            providers.push_back(p.to_peer());
+        }
+        
+        cb(providers);
+    });
 }
 
 /// async actions
@@ -321,6 +355,7 @@ void node::store(bool origin, peer p, kv val, basic_callback ok, basic_callback 
         p, proto::type::query, proto::actions::store,
         id, util::msg_id(), proto::store_query_data{ 
             .k = util::b58encode_h(val.key), 
+            .d = val.type,
             .v = val.value, 
             .o = po,
             .t = val.timestamp,
@@ -388,7 +423,7 @@ void node::find_value(peer p, hash_t target_id, find_value_callback ok, basic_ca
             if(!d.v.has_value() != !d.b.has_value()) {
                 if(d.v.has_value()) {
                     proto::stored_data sd = d.v.value();
-                    ok(p_, kv(target_id, sd.v, sd.o.to_peer(), sd.t, sd.s));
+                    ok(p_, kv(target_id, sd.d, sd.v, sd.o.to_peer(), sd.t, sd.s));
                 } else if(d.b.has_value()) {
                     bucket bkt(table);
 
@@ -793,11 +828,11 @@ node::fv_value node::lp_lookup(
 }
 
 // this is for a new key-value pair
-void node::iter_store(std::string key, std::string value) {
+void node::iter_store(int type, std::string key, std::string value) {
     hash_t hash = util::hash(key);
     bucket b = iter_find_node(hash);
     // ignores the peer object anyways
-    kv vl(hash, value, peer(), util::time_now(), "");
+    kv vl(hash, type, value, peer(), util::time_now(), "");
 
     // store operation does signing already
     for(auto i : b)

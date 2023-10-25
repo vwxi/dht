@@ -49,6 +49,11 @@ enum status {
     bad = 1
 };
 
+enum store_type {
+    data = 0,
+    provider_record = 1
+};
+
 struct peer_object {
     std::string t;
     std::string a;
@@ -62,11 +67,12 @@ struct peer_object {
 };
 
 struct stored_data {
+    int d;
     std::string v;
     peer_object o;
     u64 t;
     std::string s;
-    MSGPACK_DEFINE_MAP(v, o, t, s);
+    MSGPACK_DEFINE_MAP(d, v, o, t, s);
 };
 
 struct find_query_data {
@@ -78,11 +84,12 @@ struct find_query_data {
 
 struct store_query_data {
     std::string k;
+    int d;
     std::string v;
     boost::optional<peer_object> o;
     u64 t;
     std::string s;
-    MSGPACK_DEFINE_MAP(k, v, o, t, s);
+    MSGPACK_DEFINE_MAP(k, d, v, o, t, s);
 };
 
 struct store_resp_data {
@@ -134,10 +141,11 @@ struct message {
 
 struct sig_blob {
     std::string k;
+    int d;
     std::string v;
     std::string i;
     u64 t;
-    MSGPACK_DEFINE_MAP(k, v, i, t);
+    MSGPACK_DEFINE_MAP(k, d, v, i, t);
 };
 
 }

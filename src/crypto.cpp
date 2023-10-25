@@ -74,9 +74,8 @@ bool crypto::verify(std::string message, std::string signature) {
 bool crypto::verify(dht::hash_t id, std::string message, std::string signature) {
     auto k = ks_get(id);
 
-    if(!k.has_value()) {
+    if(!k.has_value())
         return false;
-    }
 
     bool v = verify(k.value(), message, signature);
 
