@@ -78,6 +78,7 @@ these are the actions:
 - find_node (`0x02`)
 - find_value (`0x03`)
 - pub_key (`0x04`)
+- get_addresses (`0x05`)
 
 #### store types
 
@@ -89,7 +90,14 @@ can be handled differently:
 - provider record (`0x01`)
   - this is like a pointer to data, pointing to a peer that will provide this data.
     the data itself is simply a serialized peer object.
-        
+- peer record (`0x02`)
+  - this is a signed record attributing a peer ID to an IP address
+  - they follow the following format:
+    ```
+    { "t": <transport>, "a": <address>, "p": <port>, "s": <signature> }
+    ```
+    - where transport is a string (`udp` or `tcp`) denoting which transport protocol to use and the signature is raw binary data signing the following format: `transport:ip:port`
+
 
 #### enc-string
 
@@ -475,6 +483,32 @@ where:
                 "k": ff ff ff ff ... 3e 56 7a 10
         }
 ```
+
+### get_addresses (`0x05`)
+
+this message attempts to obtain valid peer records for a given peer ID from a node. responses must be peer records with valid signatures.
+
+#### action-specific data
+
+for sender,
+
+```
+"d": {
+        "i": <peer ID>
+}
+```
+
+for recipient,
+
+```
+"d": {
+        "p": [<peer records>]
+}
+```
+
+where:
+- peer ID is an encoded string 
+- peer records are already defined 
 
 ## operations
 
