@@ -277,7 +277,7 @@ void node::put(std::string key, std::string value) {
 }
 
 void node::get(std::string key, value_callback cb) {
-    std::list<fv_value> l = disjoint_lp_lookup(util::hash(key));
+    std::list<fv_value> l = disjoint_lookup_value(util::hash(key), proto::quorum);
     std::vector<kv> values;
 
     for(auto i : l) {
@@ -535,13 +535,8 @@ std::future<node::fut_t> node::_lookup(bool fv, peer p, hash_t target_id) {
     return fut;
 }
 
-// synchronous operation
 // see xlattice/kademlia lookup
-node::fv_value node::lookup(
-    bool fv,
-    std::deque<peer> shortlist, 
-    boost::optional<std::shared_ptr<node::djc>> claimed,
-    hash_t target_id) {
+bucket node::lookup_nodes(std::deque<peer> shortlist, hash_t target_id) {
     std::list<peer> visited;
     bucket res(table);
 
@@ -563,29 +558,7 @@ node::fv_value node::lookup(
         // send out alpha RPCs
         int n = 0;
         while(n++ < proto::alpha && !shortlist.empty()) {
-            // if claimed is not nothing, we assume we're doing a disjoint lookup
-            if(claimed.has_value()) {
-                LOCK(claimed.get()->mutex);
-                auto& f = shortlist.front();
-
-                if(std::count(
-                    claimed.get()->shortlist.begin(), 
-                    claimed.get()->shortlist.end(), 
-                    f) == 0) {
-                    // we add to claimed list
-                    claimed.get()->shortlist.push_back(f);
-
-                    // add lookup
-                    tasks.push_back(_lookup(fv, f, target_id));
-                } else {
-                    // we exclude "claimed" peers from being used in more 
-                    // than one lookup to ensure disjointness
-                    if(n > 0)
-                        n--;
-                }
-            } else {
-                tasks.push_back(_lookup(fv, shortlist.front(), target_id));
-            }
+            tasks.push_back(_lookup(false, shortlist.front(), target_id));
 
             shortlist.pop_front();
         }
@@ -608,16 +581,10 @@ node::fv_value node::lookup(
                     if(!filter(p_))
                         shortlist.push_back(p_);
                 }
-            } else if(v.type() == typeid(kv) && fv) {
-                // When an iterativeFindValue succeeds, the initiator must store the key/value pair at the 
-                // closest node seen which did not return the value. (xlattice/kademlia)
-                kv vl = boost::get<kv>(v);
-                store(false, closest_node, vl, basic_nothing, basic_nothing);
-
-                acquire_pub_key(vl.origin);
-
-                return v;
             }
+
+            // unlike xlattice's design, we do not handle values as we're
+            // only looking for nodes
         }
 
         // nobody responded
@@ -644,8 +611,8 @@ node::fv_value node::lookup(
     return res;
 }
 
-// https://github.com/libp2p/specs/blob/master/kad-dht/README.md#value-retrieval
-node::fv_value node::lp_lookup(
+// see libp2p kad value retrieval 
+node::fv_value node::lookup_value(
     std::deque<peer> starting_list,
     boost::optional<std::shared_ptr<djc>> claimed,
     hash_t key, 
@@ -850,21 +817,8 @@ void node::republish(kv val) {
 
 bucket node::iter_find_node(hash_t target_id) {
     std::deque<peer> shortlist = table->find_alpha(peer(target_id));
-    fv_value v = lookup(false, shortlist, boost::none, target_id);
-    bucket b(table);
-    
-    bucket& g = boost::get<bucket>(v);
-    for(auto i : g)
-        b.push_back(i);
-
+    bucket b = lookup_nodes(shortlist, target_id);
     return b;
-}
-
-/// @note xlattice says so ... others say get() will be iter_find_node then find_value 
-node::fv_value node::iter_find_value(std::string key) {
-    hash_t hash = util::hash(key);
-    std::deque<peer> shortlist = table->find_alpha(peer(hash));
-    return lookup(true, shortlist, boost::none, hash);
 }
 
 void node::refresh(tree* ptr) {
