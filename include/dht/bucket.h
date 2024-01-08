@@ -2,12 +2,12 @@
 #define _BUCKET_H
 
 #include "util.hpp"
+#include "proto.h"
 
 namespace tulip {
 namespace dht {
 
 class routing_table;
-class peer;
 class network;
 
 class bucket : public std::list<peer> {

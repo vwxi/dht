@@ -25,7 +25,9 @@ public:
     void evict(peer);
     void update_pending(peer);
     bucket find_bucket(peer);
+    bucket& find_bucket_ref(peer);
     std::deque<peer> find_alpha(peer);
+    boost::optional<peer> find(hash_t);
     int stale(peer);
     
     hash_t id;

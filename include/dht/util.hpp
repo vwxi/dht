@@ -47,8 +47,8 @@
 #include "cryptopp/files.h"
 
 #define LOCK(m) std::lock_guard<std::mutex> l(m);
-#define R_LOCK(m) boost::shared_lock<boost::shared_mutex> l(m);
-#define W_LOCK(m) boost::upgrade_lock<boost::shared_mutex> l(m);
+#define R_LOCK(m) boost::shared_lock<boost::shared_mutex> read_lock(m);
+#define W_LOCK(m) boost::upgrade_lock<boost::shared_mutex> write_lock(m);
 #define TIME_NOW() duration_cast<seconds>(system_clock::now().time_since_epoch()).count()
 
 namespace tulip {

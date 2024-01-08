@@ -68,6 +68,22 @@ int main(int argc, char** argv) {
                 }, n.basic_nothing);
         }
         break;
+    case 7: // get peer record
+        {
+            node n(std::atoi(argv[2]));
+            peer p("udp", argv[3], std::atoi(argv[4]));
+            n.run();
+            n.join(p, 
+                [&](peer p_) {
+                    n.get_addresses(p, n.get_id(), 
+                        [&](peer, const std::vector<peer_record>& records) {
+                            spdlog::info("\taddresses associated with id {}:", util::htos(n.get_id()));
+                            for(auto r : records)
+                                spdlog::info("\t\t{}", r.address.to_string());
+                        }, n.basic_nothing);
+                }, n.basic_nothing);
+        }
+        break;
     }
 
     return 0;

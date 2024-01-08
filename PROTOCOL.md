@@ -486,7 +486,8 @@ where:
 
 ### get_addresses (`0x05`)
 
-this message attempts to obtain valid peer records for a given peer ID from a node. responses must be peer records with valid signatures.
+this message attempts to obtain valid peer records for a given peer ID from a node. responses must be peer records with valid signatures.  
+this message does not update the routing table.
 
 #### action-specific data
 
@@ -502,13 +503,14 @@ for recipient,
 
 ```
 "d": {
+        "i": <peer ID>,
         "p": [<peer records>]
 }
 ```
 
 where:
 - peer ID is an encoded string 
-- peer records are already defined 
+- `p` is an array of peer records which were already defined 
 
 ## operations
 

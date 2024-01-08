@@ -47,6 +47,7 @@ public:
     using basic_callback = std::function<void(peer)>;
     using value_callback = std::function<void(std::vector<kv>)>;
     using prov_callback = std::function<void(std::vector<peer>)>;
+    using get_addresses_callback = std::function<void(peer, const std::vector<peer_record>&)>;
 
     basic_callback basic_nothing = [](peer) { };
 
@@ -64,6 +65,7 @@ public:
     void get(std::string, value_callback);
     void provide(std::string, peer);
     void get_providers(std::string, prov_callback);
+    void get_addresses(peer, hash_t, get_addresses_callback, basic_callback);
     
     void join(peer, basic_callback, basic_callback);
     
@@ -140,13 +142,14 @@ private:
     void store(bool, peer, kv, basic_callback, basic_callback);
     void find_node(peer, hash_t, bucket_callback, basic_callback);
     void find_value(peer, hash_t, find_value_callback, basic_callback);
-    void find_value(peer, std::string, find_value_callback, basic_callback);
 
+    // message handlers
     void handle_ping(peer, proto::message);
     void handle_store(peer, proto::message);
     void handle_find_node(peer, proto::message);
     void handle_find_value(peer, proto::message);
     void handle_pub_key(peer, proto::message);
+    void handle_get_addresses(peer, proto::message);
 
     hash_t id;
 

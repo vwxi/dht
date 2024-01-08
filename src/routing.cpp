@@ -6,17 +6,17 @@
 /// @private
 /// @brief internal macro that traverses a tree based on the peer's id and also
 /// tries to find peer within current bucket after traversal
-#define TRAVERSE \
+#define TRAVERSE(I) \
     tree* ptr = NULL; \
     bucket::iterator it; \
     int cutoff = 0; \
     { \
         R_LOCK(mutex); \
         ptr = root; \
-        traverse(false, req.id, &ptr, cutoff); \
+        traverse(false, I, &ptr, cutoff); \
         assert(ptr != nullptr); \
         it = std::find_if(ptr->data.begin(), ptr->data.end(), \
-            [&](const peer& p) { return p.id == req.id; }); \
+            [&](const peer& p) { return p.id == I; }); \
     }
 
 namespace tulip {
@@ -95,7 +95,7 @@ void routing_table::split(tree* t, int cutoff) {
 
 /// @brief update peer in routing table whether or not it exists within table
 void routing_table::update(peer req) {
-    TRAVERSE;
+    TRAVERSE(req.id);
 
     // mismatched node - diff ip same id
     if(it != ptr->data.end() && !(req == *it))
@@ -156,7 +156,7 @@ void routing_table::update(peer req) {
 
 /// @brief evict peer from routing table, repeated calls will do nothing
 void routing_table::evict(peer req) {
-    TRAVERSE;
+    TRAVERSE(req.id);
 
     // does peer exist in table?
     if(it != ptr->data.end()) {
@@ -177,7 +177,7 @@ void routing_table::evict(peer req) {
 /// @brief update peer that was in node's pending list
 /// @note this is used for pings to update bucket peers
 void routing_table::update_pending(peer req) {
-    TRAVERSE;
+    TRAVERSE(req.id);
 
     W_LOCK(mutex);
     
@@ -198,14 +198,18 @@ void routing_table::update_pending(peer req) {
 
 /// @brief find bucket based on peer id
 bucket routing_table::find_bucket(peer req) {
-    TRAVERSE;
+    TRAVERSE(req.id);
+    return ptr->data;
+}
 
+bucket& routing_table::find_bucket_ref(peer req) {
+    TRAVERSE(req.id);
     return ptr->data;
 }
 
 /// @brief increment staleness by one
 int routing_table::stale(peer req) {
-    TRAVERSE;
+    TRAVERSE(req.id);
 
     W_LOCK(mutex);
 
@@ -235,9 +239,9 @@ void routing_table::dfs(std::function<void(tree*)> fn) {
 }
 
 std::deque<peer> routing_table::find_alpha(peer req) {
-    TRAVERSE;
-
     R_LOCK(mutex);
+
+    TRAVERSE(req.id);
 
     std::deque<peer> res;
 
@@ -253,6 +257,14 @@ std::deque<peer> routing_table::find_alpha(peer req) {
 
     // nothing we can do afterwards
     return res;
+}
+
+boost::optional<peer> routing_table::find(hash_t id) {
+    R_LOCK(mutex);
+
+    TRAVERSE(id);
+    
+    return (it != ptr->data.end()) ? *it : boost::optional<peer>(boost::none);
 }
 
 }

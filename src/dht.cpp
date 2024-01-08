@@ -270,6 +270,59 @@ void node::handle_pub_key(peer p, proto::message msg) {
     }
 }
 
+void node::handle_get_addresses(peer p, proto::message msg) {
+    if(msg.m == proto::type::query) {
+        proto::get_addresses_query_data d;
+        msg.d.convert(d);
+
+        boost::optional<peer> p_ = table->find(util::b58decode_h(d.i));
+
+        std::vector<proto::get_addresses_peer_record> addresses;
+
+        if(p_.has_value()) {
+            // we should have already ignored bad peer records.
+            for(auto a : p_.value().addresses) 
+                addresses.push_back(proto::get_addresses_peer_record {
+                    .t = a.address.transport(),
+                    .a = a.address.addr,
+                    .p = a.address.port,
+                    .s = a.signature
+                }
+            );
+        }
+
+        net.send(false,
+            p, proto::type::response, proto::actions::get_addresses,
+            id, msg.q, proto::get_addresses_resp_data{
+                .p = addresses
+            },
+            net.queue.q_nothing, net.queue.f_nothing);
+    } else if(msg.m == proto::type::response) {
+        proto::get_addresses_resp_data d;
+        msg.d.convert(d);
+
+        // erase all records with invalid signatures
+        d.p.erase(std::remove_if(d.p.begin(), d.p.end(),
+            [&, this](proto::get_addresses_peer_record r) {
+                hash_t t_id = util::b58decode_h(d.i);
+                peer_record record(r.t, r.a, r.p, r.s);
+                
+                // hacky
+                if(acquire_pub_key(peer(t_id, record))) {
+                    return !crypto.verify(t_id, record.address.to_string(), record.signature);
+                } else return true; // could not acquire pub key     
+            }));
+
+        // hacky, repack
+        std::stringstream ss;
+        msgpack::pack(ss, d);
+
+        net.queue.satisfy(p, msg.q, ss.str());
+
+        /// @note get_addresses does not update table
+    }
+}
+
 /// public interfaces 
 
 void node::put(std::string key, std::string value) {
@@ -451,10 +504,6 @@ void node::find_value(peer p, hash_t target_id, find_value_callback ok, basic_ca
         bad);
 }
 
-void node::find_value(peer p, std::string key, find_value_callback ok, basic_callback bad) {
-    find_value(p, util::hash(key), ok, bad);
-}
-
 void node::pub_key(peer p, pub_key_callback ok, basic_callback bad) {
     std::string token = util::gen_token(treng);
 
@@ -484,6 +533,41 @@ void node::pub_key(peer p, pub_key_callback ok, basic_callback bad) {
                 ok(p_, s);
             else
                 bad(p_);
+        },
+        bad);
+}
+
+void node::get_addresses(peer p, hash_t target_id, get_addresses_callback ok, basic_callback bad) {
+    net.send(true,
+        p, proto::type::query, proto::actions::get_addresses,
+        id, util::msg_id(), proto::get_addresses_query_data {
+            .i = util::b58encode_h(target_id)
+        },
+        [this, ok, bad, target_id](peer p_, std::string s) {
+            msgpack::object_handle oh;
+            msgpack::unpack(oh, s.data(), s.size());
+            msgpack::object obj = oh.get();
+            proto::get_addresses_resp_data d;
+            obj.convert(d);
+
+            bucket& bkt = table->find_bucket_ref(target_id);
+            auto it = std::find_if(bkt.begin(), bkt.end(), [target_id](const peer& p) {
+                return p.id == target_id;
+            });
+
+            // already filtered in handler
+            if(it != bkt.end()) {
+                for(auto r : d.p) {
+                    peer_record record(r.t, r.a, r.p, r.s);
+                    if(!std::count(it->addresses.begin(), it->addresses.end(), record)) {
+                        it->addresses.push_back(record);
+                    }
+                }
+
+                ok(p_, it->addresses);
+            } else {
+                bad(p_);
+            }
         },
         bad);
 }

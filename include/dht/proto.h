@@ -6,8 +6,63 @@
 namespace tulip {
 namespace dht {
 
+struct net_addr {
+    typedef boost::variant<tcp::endpoint, udp::endpoint> endp;
+
+    enum {
+        t_udp,
+        t_tcp
+    } transport_type;
+
+    std::string addr;
+    u16 port;
+
+    net_addr(std::string t, std::string a, u16 p) : addr(a), port(p) {
+        if(t == "udp") transport_type = t_udp;
+        else if(t == "tcp") transport_type = t_tcp;
+    }
+
+    endp endpoint() const {
+        switch(transport_type) {
+        case t_udp: return udp::endpoint{boost::asio::ip::address::from_string(addr), port};
+        case t_tcp: return tcp::endpoint{boost::asio::ip::address::from_string(addr), port};
+        }
+    }
+
+    bool operator==(const net_addr& rhs) const {
+        return transport_type == rhs.transport_type && addr == rhs.addr && port == rhs.port; 
+    }
+
+    std::string transport() const {
+        switch(transport_type) {
+        case t_udp: return "udp";
+        case t_tcp: return "tcp";
+        default: return "unknown";
+        }
+    }
+
+    std::string to_string() const {
+        return fmt::format("{}:{}:{}", transport(), addr, port);
+    }
+};
+
+struct peer_record {
+    net_addr address;
+    std::string signature;
+    
+    peer_record(std::string t, std::string a, u16 p, std::string s) :
+        address(t, a, p), signature(s) { }
+
+    bool operator==(const peer_record& r) {
+        return address == r.address && signature == r.signature;
+    }
+};
+
 struct peer {
     typedef boost::variant<tcp::endpoint, udp::endpoint> endp;
+
+    /// @todo empty for now.
+    std::vector<peer_record> addresses;
 
     std::string transport;
     hash_t id;
@@ -18,8 +73,23 @@ struct peer {
 
     peer() = default;
     peer(hash_t id_) : id(id_) { }
-    peer(std::string t, std::string a, u16 p, hash_t id_) : transport(t), addr(a), port(p), staleness(0), id(id_) { }
-    peer(std::string t, std::string a, u16 p) : transport(t), addr(a), port(p), staleness(0), id(0) { }
+    peer(std::string t, std::string a, u16 p, hash_t id_) : 
+        transport(t), addr(a), port(p), staleness(0), id(id_) { 
+        
+    }
+    
+    peer(std::string t, std::string a, u16 p) : 
+        transport(t), addr(a), port(p), staleness(0), id(0) { 
+
+    }
+    
+    // hacky
+    peer(hash_t id_, peer_record r) : 
+        transport(r.address.transport()), id(id_), 
+        addr(r.address.addr), port(r.address.port), staleness(0) { 
+        addresses.push_back(r);
+    }
+    
     tcp::endpoint t_endpoint() const { return tcp::endpoint{boost::asio::ip::address::from_string(addr), port}; }
     udp::endpoint u_endpoint() const { return udp::endpoint{boost::asio::ip::address::from_string(addr), port}; }
     endp endpoint() const { return !transport.compare("udp") ? endp(u_endpoint()) : (!transport.compare("tcp") ? endp(t_endpoint()) : endp()); } 
@@ -36,7 +106,8 @@ enum actions {
     store = 1,
     find_node = 2,
     find_value = 3,
-    pub_key = 4
+    pub_key = 4,
+    get_addresses = 5
 };
 
 enum type {
@@ -125,6 +196,27 @@ struct pub_key_resp_data {
     std::string k;
     std::string s;
     MSGPACK_DEFINE_MAP(k, s);
+};
+
+// get_addresses
+
+struct get_addresses_peer_record {
+    std::string t;
+    std::string a;
+    int p;
+    std::string s;
+    MSGPACK_DEFINE_MAP(t, a, p, s);
+};
+
+struct get_addresses_query_data {
+    std::string i;
+    MSGPACK_DEFINE_MAP(i);
+};
+
+struct get_addresses_resp_data {
+    std::string i;
+    std::vector<get_addresses_peer_record> p;
+    MSGPACK_DEFINE_MAP(i, p);
 };
 
 struct message {
