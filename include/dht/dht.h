@@ -51,7 +51,7 @@ public:
 
     basic_callback basic_nothing = [](peer) { };
 
-    node(u16);
+    node(bool, u16);
 
     hash_t get_id() const;
     
@@ -152,7 +152,7 @@ private:
     void handle_get_addresses(peer, proto::message);
 
     hash_t id;
-
+    
     std::atomic_bool running;
 
     network net;

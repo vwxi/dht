@@ -5,8 +5,8 @@
 namespace tulip {
 namespace dht {
 
-node::node(u16 port) :
-    net(port,
+node::node(bool local, u16 port) :
+    net(local, port,
         std::bind(&node::handle_ping, this, _1, _2),
         std::bind(&node::handle_store, this, _1, _2),
         std::bind(&node::handle_find_node, this, _1, _2),
@@ -44,6 +44,8 @@ void node::_run() {
 
     net.run();
     
+    spdlog::debug("ip address: {}", net.get_ip_address());
+
     refresh_thread = std::thread([&, this]() {
         while(true) {
             std::this_thread::sleep_for(seconds(proto::refresh_interval));

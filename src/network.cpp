@@ -85,14 +85,17 @@ bool msg_queue::pending(peer p, u64 msg_id) {
 /// networking
 
 network::network(
+    bool local_,
     u16 p,
     m_callback handle_ping_,
     m_callback handle_store_,
     m_callback handle_find_node_,
     m_callback handle_find_value_,
     m_callback handle_pub_key_) :
+    local(local_),
     port(p),
     socket(ioc, udp::endpoint(udp::v4(), p)),
+    upnp_(false), // TODO: consider ipv6 addition?
     handle_ping(handle_ping_),
     handle_store(handle_store_),
     handle_find_node(handle_find_node_),

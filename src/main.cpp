@@ -9,20 +9,20 @@ int main(int argc, char** argv) {
     switch(std::atoi(argv[1])) {
     case 1: // bare node
         {
-            node n(16161);
+            node n(true, 16161);
             n.run();
         }
         break;
     case 2: // join and do nothing
         {
-            node n(std::atoi(argv[2]));
+            node n(true, std::atoi(argv[2]));
             n.run();
             n.join(peer("udp", argv[3], std::atoi(argv[4])), n.basic_nothing, n.basic_nothing);
         }
         break;
     case 3: // join and store a value
         {
-            node n(std::atoi(argv[2]));
+            node n(true, std::atoi(argv[2]));
             n.run();
             n.join(peer("udp", argv[3], std::atoi(argv[4])), 
                 [&](peer p_) {
@@ -32,7 +32,7 @@ int main(int argc, char** argv) {
         break;
     case 4: // join and fetch value(s)
         {
-            node n(std::atoi(argv[2]));
+            node n(true, std::atoi(argv[2]));
             n.run();
             n.join(peer("udp", argv[3], std::atoi(argv[4])), 
                 [&](peer p_) {
@@ -47,7 +47,7 @@ int main(int argc, char** argv) {
         break;
     case 5: // join and start providing
         {
-            node n(std::atoi(argv[2]));
+            node n(true, std::atoi(argv[2]));
             n.run();
             n.join(peer("udp", argv[3], std::atoi(argv[4])), 
                 [&](peer p_) {
@@ -57,7 +57,7 @@ int main(int argc, char** argv) {
         break;
     case 6: // join and fetch provider(s)
         {
-            node n(std::atoi(argv[2]));
+            node n(true, std::atoi(argv[2]));
             n.run();
             n.join(peer("udp", argv[3], std::atoi(argv[4])), 
                 [&](peer p_) {
@@ -70,7 +70,7 @@ int main(int argc, char** argv) {
         break;
     case 7: // get peer record
         {
-            node n(std::atoi(argv[2]));
+            node n(true, std::atoi(argv[2]));
             peer p("udp", argv[3], std::atoi(argv[4]));
             n.run();
             n.join(p, 

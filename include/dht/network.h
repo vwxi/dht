@@ -4,6 +4,7 @@
 #include "util.hpp"
 #include "routing.h"
 #include "proto.h"
+#include "upnp.h"
 
 namespace tulip {
 namespace dht {
@@ -42,7 +43,7 @@ class network {
 public:
     using m_callback = std::function<void(peer, proto::message)>;
 
-    network(u16, m_callback, m_callback, m_callback, m_callback, m_callback);
+    network(bool, u16, m_callback, m_callback, m_callback, m_callback, m_callback);
     ~network();
 
     void run();
@@ -77,7 +78,14 @@ public:
 
     msg_queue queue;
     u16 port;
+    bool local;
     
+    std::string get_ip_address() {
+        return local ? 
+            upnp_.get_local_ip_address() : 
+            upnp_.get_external_ip_address();
+    }
+
 private:
     void handle(std::string, udp::endpoint);
 
@@ -91,6 +99,8 @@ private:
     std::thread ioc_thread;
     udp::socket socket;
     udp::endpoint endpoint;
+
+    upnp upnp_;
 };
 
 }

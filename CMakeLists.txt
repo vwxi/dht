@@ -60,6 +60,7 @@ add_executable(
 	src/routing.cpp
 	src/dht.cpp
 	src/crypto.cpp
+	src/upnp.cpp
 )
 
 target_include_directories(
