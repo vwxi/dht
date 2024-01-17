@@ -8,3 +8,6 @@
 [submodule "extern/cryptopp-cmake"]
 	path = extern/cryptopp-cmake
 	url = https://github.com/abdes/cryptopp-cmake
+[submodule "extern/miniupnp"]
+	path = extern/miniupnp
+	url = https://github.com/miniupnp/miniupnp
