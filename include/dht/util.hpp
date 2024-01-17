@@ -45,6 +45,7 @@
 #include "cryptopp/osrng.h"
 #include "cryptopp/hex.h"
 #include "cryptopp/files.h"
+#include "miniupnpc/miniupnpc.h"
 
 #define LOCK(m) std::lock_guard<std::mutex> l(m);
 #define R_LOCK(m) boost::shared_lock<boost::shared_mutex> read_lock(m);

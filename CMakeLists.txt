@@ -41,17 +41,16 @@ if(GIT_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")
     endif()
 endif()
 
-if(NOT EXISTS "${PROJECT_SOURCE_DIR}/extern/spdlog/CMakeLists.txt")
-    message(FATAL_ERROR "The submodules were not downloaded! GIT_SUBMODULE was turned off or failed. Please update submodules and try again.")
-endif()
-
-if(NOT EXISTS "${PROJECT_SOURCE_DIR}/extern/msgpack-c/CMakeLists.txt")
+if(NOT EXISTS "${PROJECT_SOURCE_DIR}/extern/spdlog/CMakeLists.txt" OR 
+	NOT EXISTS "${PROJECT_SOURCE_DIR}/extern/msgpack-c/CMakeLists.txt" OR 
+	NOT EXISTS "${PROJECT_SOURCE_DIR}/extern/miniupnp/miniupnpc/CMakeLists.txt")
     message(FATAL_ERROR "The submodules were not downloaded! GIT_SUBMODULE was turned off or failed. Please update submodules and try again.")
 endif()
 
 add_subdirectory(extern/spdlog)
 add_subdirectory(extern/msgpack-c)
 add_subdirectory(extern/cryptopp)
+add_subdirectory(extern/miniupnp/miniupnpc)
 
 add_executable(
 	dht
@@ -70,4 +69,4 @@ target_include_directories(
 	"${PROJECT_SOURCE_DIR}/extern"
 )
 
-target_link_libraries(dht PUBLIC Boost::system Boost::thread spdlog::spdlog pthread msgpack-cxx cryptopp)
+target_link_libraries(dht PUBLIC Boost::system Boost::thread spdlog::spdlog pthread msgpack-cxx cryptopp miniupnpc)
