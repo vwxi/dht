@@ -92,6 +92,13 @@ const int token_length = 32; // length of secret tokens
 
 }
 
+namespace constants {
+
+const int upnp_release_interval = 14400; // number of seconds between each upnp port re-leasing
+
+}
+
+
 typedef boost::multiprecision::number<
     boost::multiprecision::cpp_int_backend<
         proto::bit_hash_width, 

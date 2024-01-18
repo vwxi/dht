@@ -106,27 +106,27 @@ void routing_table::update(peer req) {
     hash_t mask(~hash_t(0) << (proto::bit_hash_width - cutoff));
     
     if(ptr->data.size() < ptr->data.max_size) {
-        spdlog::debug("bucket isn't full, update node {}", util::htos(req.id));
+        spdlog::debug("routing: bucket isn't full, update node {}", util::htos(req.id));
         // bucket is not full, update node
         ptr->data.update(req, true);
     } else {
         if((req.id & mask) == (id & mask)) {
             if(it == ptr->data.end()) {
-                spdlog::debug("bucket is within prefix, split");
+                spdlog::debug("routing: bucket is within prefix, split");
                 // bucket is full and within our own prefix, split
                 /// @todo relaxed splitting, see https://stackoverflow.com/questions/32129978/highly-unbalanced-kademlia-routing-table/32187456#32187456
                 split(ptr, cutoff);
             } else {
-                spdlog::debug("bucket is nearby and full");
+                spdlog::debug("routing: bucket is nearby and full");
                 // bucket is full but nearby, update node
                 ptr->data.update(req, true);
             }
         } else {
-            spdlog::debug("bucket is far and full");
+            spdlog::debug("routing: bucket is far and full");
             if(it != ptr->data.end()) {
                 // node is known to us already, ping normally
                 ptr->data.update(req, false);
-                spdlog::debug("node {} exists in table, updating normally", util::htos(req.id));
+                spdlog::debug("routing: node {} exists in table, updating normally", util::htos(req.id));
             } else {
                 LOCK(ptr->cache_mutex);
                 
@@ -137,17 +137,17 @@ void routing_table::update(peer req) {
                 if(cit == ptr->cache.end()) {
                     // is the cache full? kick out oldest node and add this one
                     if(ptr->cache.size() > proto::repl_cache_size) {
-                        spdlog::debug("replacement cache is full, removing oldest candidate");
+                        spdlog::debug("routing: replacement cache is full, removing oldest candidate");
                         ptr->cache.pop_front();
                     }
                     
                     // node is unknown and doesn't exist in cache, add
                     ptr->cache.push_back(req);
-                    spdlog::debug("node {} is unknown, adding to replacement cache", util::htos(req.id));
+                    spdlog::debug("routing: node {} is unknown, adding to replacement cache", util::htos(req.id));
                 } else {
                     // node is unknown and exists in cache, move to back
                     ptr->cache.splice(ptr->cache.end(), ptr->cache, cit);
-                    spdlog::debug("node {} is unknown, moving to end of replacement cache", util::htos(req.id));
+                    spdlog::debug("routing: node {} is unknown, moving to end of replacement cache", util::htos(req.id));
                 }
             }
         }
@@ -167,7 +167,7 @@ void routing_table::evict(peer req) {
         if(ptr->cache.size() > 0) {
             auto cit = ptr->cache.end();
             cit--;
-            spdlog::debug("there is peer ({}) in the cache waiting, add it to the bucket", util::htos(cit->id));
+            spdlog::debug("routing: there is peer ({}) in the cache waiting, add it to the bucket", util::htos(cit->id));
             ptr->data.push_back(*cit);
             ptr->cache.erase(cit);
         }
@@ -187,11 +187,11 @@ void routing_table::update_pending(peer req) {
         if(req.staleness++ < proto::missed_pings_allowed) {
             req.staleness--;
             ptr->data.splice(ptr->data.end(), ptr->data, it);
-            spdlog::debug("pending node {} updated", util::htos(req.id));
+            spdlog::debug("routing: pending node {} updated", util::htos(req.id));
         } else {
             // otherwise, erase peer from bucket
             ptr->data.erase(it);
-            spdlog::debug("erasing pending node {}", util::htos(req.id));
+            spdlog::debug("routing: erasing pending node {}", util::htos(req.id));
         }
     }
 }

@@ -97,6 +97,7 @@ private:
 
     boost::asio::io_context ioc;
     std::thread ioc_thread;
+    std::thread release_thread;
     udp::socket socket;
     udp::endpoint endpoint;
 

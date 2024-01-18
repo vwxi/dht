@@ -17,22 +17,22 @@ void bucket::update(peer req, bool nearby) {
 
     if(!nearby) {
         peer beg = *begin();
-        spdlog::debug("checking if node {} is alive", beg());
+        spdlog::debug("routing: checking if node {} is alive", beg());
 
         table->net.send(true,
             beg, proto::type::query, proto::actions::ping, 
             table->id, util::msg_id(), msgpack::type::nil_t(),
             [this](peer p, std::string) {
-                spdlog::debug("responded, updating");
+                spdlog::debug("routing: responded, updating");
                 table->update_pending(p);
             },
             [this](peer p) {
                 int s;
                 if((s = table->stale(p)) > proto::missed_pings_allowed) {
                     table->evict(p);
-                    spdlog::debug("did not respond, evicting {}", util::htos(p.id));
+                    spdlog::debug("routing: did not respond, evicting {}", util::htos(p.id));
                 } else if(s != -1) {
-                    spdlog::debug("did not respond. staleness: {}", s);
+                    spdlog::debug("routing: did not respond. staleness: {}", s);
                 }
             });
 
@@ -42,13 +42,13 @@ void bucket::update(peer req, bool nearby) {
     if(rit != end()) {
         peer _p = *rit;            
         splice(end(), *this, rit);
-        spdlog::debug("exists already, moved node {} to tail. size: {}", util::htos(_p.id), size());
+        spdlog::debug("routing: exists already, moved node {} to tail. size: {}", util::htos(_p.id), size());
         goto end;
     }
 
     if(size() < max_size) {
         push_back(req);
-        spdlog::debug("pushed back, size: {}", size());
+        spdlog::debug("routing: pushed back, size: {}", size());
         goto end;
     }
 

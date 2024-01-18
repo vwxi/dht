@@ -38,19 +38,19 @@ void node::_run() {
     table_ref = table;
     table->init();
 
-    spdlog::debug("running DHT node on port {} (id: {})", net.port, util::b58encode_h(id));
+    spdlog::debug("dht: running DHT node on port {} (id: {})", net.port, util::b58encode_h(id));
     
     running = true;
 
     net.run();
     
-    spdlog::debug("ip address: {}", net.get_ip_address());
+    spdlog::debug("dht: ip address: {}", net.get_ip_address());
 
     refresh_thread = std::thread([&, this]() {
         while(true) {
             std::this_thread::sleep_for(seconds(proto::refresh_interval));
             table->dfs([&, this](tree* ptr) {
-                auto time_since = TIME_NOW() - ptr->data.last_seen;
+                auto time_since = util::time_now() - ptr->data.last_seen;
                 if(time_since > proto::refresh_time)
                     refresh(ptr);
             });
@@ -715,14 +715,14 @@ node::fv_value node::lookup_value(
         auto it = ht.find(key);
 
         if(it != ht.end() && Q < 2) {
-            spdlog::debug("Q<2, found in local store, returning.");
+            spdlog::debug("dht: Q<2, found in local store, returning.");
             return it->second;
         } else if(it != ht.end()) {
             // otherwise, we count it as one of the values
             
             cnt++;
             best = it->second;
-            spdlog::debug("found already in local store, adding to values.");
+            spdlog::debug("dht: found already in local store, adding to values.");
         }
     }
 
@@ -734,11 +734,11 @@ node::fv_value node::lookup_value(
         // if we've collected `Q` or more answers, return `best`.
         // if there are no requests pending and `pn` is empty, return `best`.
         if(cnt >= Q || (pending == 0 && pn.empty())) {
-            spdlog::debug("quorum reached. sending stores to outdated nodes.");
+            spdlog::debug("dht: quorum reached. sending stores to outdated nodes.");
 
             // storing `best` at `po` nodes
             for(auto p : po) {
-                spdlog::debug("storing best value at {}", p());
+                spdlog::debug("dht: storing best value at {}", p());
                 store(false, p, best, basic_nothing, basic_nothing);
             }
 
@@ -765,10 +765,10 @@ node::fv_value node::lookup_value(
                     claimed.get()->shortlist.end(),
                     p) == 0) {
                     claimed.get()->shortlist.push_back(p);
-                    spdlog::debug("disjoint: {} not seen, adding to claimed list", p());
+                    spdlog::debug("dht: disjoint: {} not seen, adding to claimed list", p());
                 } else {
                     // if seen already, we exclude this "claimed" peer
-                    spdlog::debug("disjoint: {} seen already, excluding, {}", p());
+                    spdlog::debug("dht: disjoint: {} seen already, excluding, {}", p());
                     if(n > 0)
                         n--;
                     continue;
@@ -778,7 +778,7 @@ node::fv_value node::lookup_value(
             // `pending` should never be larger than `alpha`
             pending++;
             tasks.push_back(_lookup(true, p, key));
-            spdlog::debug("querying {}...", p());
+            spdlog::debug("dht: querying {}...", p());
             
             // mark it as queried in `pq`
             pq.push_back(p);
@@ -800,15 +800,15 @@ node::fv_value node::lookup_value(
 
             // if an error or timeout occurs, discard it
             if(v.type() == typeid(boost::blank)) {
-                spdlog::debug("timeout/error from {}, discarding.", p());        
+                spdlog::debug("dht: timeout/error from {}, discarding.", p());        
                 continue;
             }
 
-            spdlog::debug("message back from {} ->", p());
+            spdlog::debug("dht: message back from {} ->", p());
 
             // if without value, add not already queried/to be queried closest nodes to `pn`
             if(v.type() == typeid(bucket)) {
-                spdlog::debug("\treceived bucket, adding unvisited peers ->");
+                spdlog::debug("dht: \treceived bucket, adding unvisited peers ->");
                 for(auto p_ : boost::get<bucket>(v)) {
                     // make sure it hasn't been queried,
                     // isn't already part of the to-query list and
@@ -816,7 +816,7 @@ node::fv_value node::lookup_value(
                     if(std::count(pq.begin(), pq.end(), p_) == 0 &&
                         std::count(pn.begin(), pn.end(), p_) == 0 &&
                         p_.id != id) {
-                        spdlog::debug("\t\tpeer {}", p_());
+                        spdlog::debug("dht: \t\tpeer {}", p_());
                         pn.push_back(p_);
                     }
                 }
@@ -827,12 +827,12 @@ node::fv_value node::lookup_value(
                 kv kv_ = boost::get<kv>(v);
                 cnt++;
 
-                spdlog::debug("\treceived value ->");
+                spdlog::debug("dht: \treceived value ->");
 
                 // if this is the first value we've seen, 
                 // store it in `best` and store peer in `pb` (best peer list)
                 if(best_empty) {
-                    spdlog::debug("\t\tfirst value received, adding to best.");
+                    spdlog::debug("dht: \t\tfirst value received, adding to best.");
                     best_empty = false;
                     best = kv_;
 
@@ -840,13 +840,13 @@ node::fv_value node::lookup_value(
                 } else {
                     // otherwise, we resolve the conflict by calling validator
 
-                    spdlog::debug("\t\tresolving conflict with validator ->");
+                    spdlog::debug("dht: \t\tresolving conflict with validator ->");
                     // select newest and most valid between `best` and this value.
                     // if equal(?) just add peer to `pb`
                     if(crypto.validate(kv_) && kv_.timestamp >= best.timestamp) {
                         // if new value is equal just add to `pb`
                         if(kv_.timestamp == best.timestamp) {
-                            spdlog::debug("\t\t\tnew value is equal to best, adding peer to pb.");
+                            spdlog::debug("dht: \t\t\tnew value is equal to best, adding peer to pb.");
                             pb.push_back(p);
                         }
                         
@@ -854,14 +854,14 @@ node::fv_value node::lookup_value(
                         // outdated (empty `pb` into `po`) and set new peer as `best`
                         // and also add it to `pb`
                         else {
-                            spdlog::debug("\t\t\tnew value wins, marking peers as outdated ->");
+                            spdlog::debug("dht: \t\t\tnew value wins, marking peers as outdated ->");
 
                             for(auto o : pb) {
-                                spdlog::debug("\t\t\t\tmarking peer {} as outdated", o());
+                                spdlog::debug("dht: \t\t\t\tmarking peer {} as outdated", o());
                                 po.push_back(o);
                             }
                             
-                            spdlog::debug("\t\t\tclearing pb, setting new value as best, pushing peer to pb");
+                            spdlog::debug("dht: \t\t\tclearing pb, setting new value as best, pushing peer to pb");
                             pb.clear();
                             best = kv_;
 
@@ -869,7 +869,7 @@ node::fv_value node::lookup_value(
                         }
                     } else {
                         // if new value loses, add current peer to `po`
-                        spdlog::debug("\t\t\tnew value lost, adding current peer to po");
+                        spdlog::debug("dht: \t\t\tnew value lost, adding current peer to po");
                         po.push_back(p);
                     }
                 }
@@ -919,7 +919,7 @@ void node::refresh(tree* ptr) {
     if(!bkt.empty()) {
         W_LOCK(table->mutex);
         ptr->data = bkt;
-        spdlog::debug("refreshed bucket {}, sz: {}", util::htos(ptr->prefix.prefix), ptr->data.size());
+        spdlog::debug("dht: refreshed bucket {}, sz: {}", util::htos(ptr->prefix.prefix), ptr->data.size());
     }
 }
 

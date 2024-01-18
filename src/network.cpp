@@ -103,10 +103,21 @@ network::network(
     handle_pub_key(handle_pub_key_) { }
 
 network::~network() {
+    release_thread.join();
     ioc_thread.join();
 }
 
 void network::run() {
+    release_thread = std::thread([&, this]() {
+        while(!local) {
+            if(!upnp_.forward_port("dht", u_UDP, port)) {
+                spdlog::error("upnp: failed to re-lease port mapping");
+            }
+
+            std::this_thread::sleep_for(seconds(constants::upnp_release_interval));
+        }
+    });
+
     recv();
     ioc_thread = std::thread([&, this]() { ioc.run(); });
 }
@@ -143,14 +154,14 @@ void network::recv() {
 }
 
 void network::handle(std::string buf, udp::endpoint ep) {
-    msgpack::object_handle result;
-
-    msgpack::unpack(result, buf.c_str(), buf.size());
-    msgpack::object obj(result.get());
-
-    proto::message msg = obj.as<proto::message>();
-
     try {
+        msgpack::object_handle result;
+
+        msgpack::unpack(result, buf.c_str(), buf.size());
+        msgpack::object obj(result.get());
+
+        proto::message msg = obj.as<proto::message>();
+
         peer p("udp", ep.address().to_string(), ep.port(), util::b58decode_h(msg.i));
         
         // if there's already a response pending, drop this one
@@ -164,7 +175,7 @@ void network::handle(std::string buf, udp::endpoint ep) {
         case proto::actions::find_value: handle_find_value(std::move(p), std::move(msg)); break;
         case proto::actions::pub_key: handle_pub_key(std::move(p), std::move(msg)); break;
         }
-    } catch (std::exception& e) { spdlog::error("handle exception: {}", e.what()); }
+    } catch (std::exception& e) { }
 }
 
 
