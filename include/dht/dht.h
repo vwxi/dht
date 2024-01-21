@@ -73,7 +73,7 @@ private:
     using fv_value = boost::variant<boost::blank, kv, bucket>;
     using bucket_callback = std::function<void(peer, bucket)>;
     using find_value_callback = std::function<void(peer, fv_value)>;
-    using pub_key_callback = std::function<void(peer, std::string)>;
+    using identify_callback = std::function<void(peer, std::string)>;
     using fut_t = std::tuple<peer, fv_value>;
 
     struct djc {
@@ -88,12 +88,12 @@ private:
     void ping(peer, basic_callback, basic_callback);
     void iter_store(int, std::string, std::string);
     bucket iter_find_node(hash_t);
-    void pub_key(peer, pub_key_callback, basic_callback);
+    void identify(peer, identify_callback, basic_callback);
 
     std::future<fut_t> _lookup(bool, peer, hash_t);
-    std::future<std::string> _pub_key(peer);
+    std::future<std::string> _identify(peer);
 
-    bool acquire_pub_key(peer);
+    bool identify_node(peer);
     
     bucket lookup_nodes(std::deque<peer>, hash_t);
     fv_value lookup_value(std::deque<peer>, boost::optional<std::shared_ptr<djc>>, hash_t, int);
@@ -148,7 +148,7 @@ private:
     void handle_store(peer, proto::message);
     void handle_find_node(peer, proto::message);
     void handle_find_value(peer, proto::message);
-    void handle_pub_key(peer, proto::message);
+    void handle_identify(peer, proto::message);
     void handle_get_addresses(peer, proto::message);
 
     hash_t id;

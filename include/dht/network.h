@@ -93,7 +93,7 @@ private:
     m_callback handle_store;
     m_callback handle_find_node;
     m_callback handle_find_value;
-    m_callback handle_pub_key;
+    m_callback handle_identify;
 
     boost::asio::io_context ioc;
     std::thread ioc_thread;

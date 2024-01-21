@@ -77,7 +77,7 @@ these are the actions:
 - store (`0x01`)
 - find_node (`0x02`)
 - find_value (`0x03`)
-- pub_key (`0x04`)
+- identify (`0x04`)
 - get_addresses (`0x05`)
 
 #### store types
@@ -426,10 +426,9 @@ as seen above in the `find_node` response.
         }
 ```
 
-### pub_key (`0x04`)
+### identify (`0x04`)
 
-this message is very simple. peer queries for public key in BER(?) key format (used in crypto++).  
-this message does not update the routing table.  
+this message is very simple. peer queries for public key in BER(?) key format (used in crypto++).  this function will also validate a peer's IP address.
 
 this message should be sent to peers before querying for closest nodes or key-value pairs to validate  
 message and key-value signatures.
@@ -456,7 +455,7 @@ recipient uses the following format:
 where:
 - secret token is a string of `token_length` random characters
 - public key is binary data 
-- signature is the signature for the secret token
+- signature is the signature for the following string format: `secret token:IP address:port`
 
 #### sequence
 

@@ -69,7 +69,7 @@ struct peer {
     std::string addr;
     u16 port;
     int staleness;
-    boost::optional<std::string> pub_key;
+    boost::optional<std::string> identify;
 
     peer() = default;
     peer(hash_t id_) : id(id_) { }
@@ -106,7 +106,7 @@ enum actions {
     store = 1,
     find_node = 2,
     find_value = 3,
-    pub_key = 4,
+    identify = 4,
     get_addresses = 5
 };
 
@@ -185,14 +185,14 @@ struct find_value_resp_data {
     MSGPACK_DEFINE_MAP(v, b);
 };
 
-// pub_key
+// identify
 
-struct pub_key_query_data {
+struct identify_query_data {
     std::string s;
     MSGPACK_DEFINE_MAP(s);
 };
 
-struct pub_key_resp_data {
+struct identify_resp_data {
     std::string k;
     std::string s;
     MSGPACK_DEFINE_MAP(k, s);

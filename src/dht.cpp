@@ -11,7 +11,7 @@ node::node(bool local, u16 port) :
         std::bind(&node::handle_store, this, _1, _2),
         std::bind(&node::handle_find_node, this, _1, _2),
         std::bind(&node::handle_find_value, this, _1, _2),
-        std::bind(&node::handle_pub_key, this, _1, _2)),
+        std::bind(&node::handle_identify, this, _1, _2)),
     reng(rd()),
     treng(rd()),
     running(false) {
@@ -246,20 +246,22 @@ void node::handle_find_value(peer p, proto::message msg) {
     }
 }
 
-void node::handle_pub_key(peer p, proto::message msg) {
+void node::handle_identify(peer p, proto::message msg) {
     if(msg.m == proto::type::query) {
-        proto::pub_key_query_data d;
+        proto::identify_query_data d;
         msg.d.convert(d);
         
         net.send(false,
-            p, proto::type::response, proto::actions::pub_key,
-            id, msg.q, proto::pub_key_resp_data{
+            p, proto::type::response, proto::actions::identify,
+            id, msg.q, proto::identify_resp_data{
                 .k = crypto.pub_key(),
-                .s = crypto.sign(d.s) // sign secret token
+                .s = crypto.sign(
+                    fmt::format("{}:{}:{}", 
+                        d.s, p.addr, p.port)) // sign secret token
             },
             net.queue.q_nothing, net.queue.f_nothing);
     } else if(msg.m == proto::type::response) {
-        proto::pub_key_resp_data d;
+        proto::identify_resp_data d;
         msg.d.convert(d);
 
         // hacky, repack
@@ -268,7 +270,7 @@ void node::handle_pub_key(peer p, proto::message msg) {
 
         net.queue.satisfy(p, msg.q, ss.str());
 
-        /// @note pub_key does not update table
+        /// @note identify does not update table
     }
 }
 
@@ -310,7 +312,7 @@ void node::handle_get_addresses(peer p, proto::message msg) {
                 peer_record record(r.t, r.a, r.p, r.s);
                 
                 // hacky
-                if(acquire_pub_key(peer(t_id, record))) {
+                if(identify_node(peer(t_id, record))) {
                     return !crypto.verify(t_id, record.address.to_string(), record.signature);
                 } else return true; // could not acquire pub key     
             }));
@@ -506,19 +508,19 @@ void node::find_value(peer p, hash_t target_id, find_value_callback ok, basic_ca
         bad);
 }
 
-void node::pub_key(peer p, pub_key_callback ok, basic_callback bad) {
+void node::identify(peer p, identify_callback ok, basic_callback bad) {
     std::string token = util::gen_token(treng);
 
     net.send(true,
-        p, proto::type::query, proto::actions::pub_key,
-        id, util::msg_id(), proto::pub_key_query_data {
+        p, proto::type::query, proto::actions::identify,
+        id, util::msg_id(), proto::identify_query_data {
             .s = token
         },
         [this, ok, bad, token](peer p_, std::string s) {
             msgpack::object_handle oh;
             msgpack::unpack(oh, s.data(), s.size());
             msgpack::object obj = oh.get();
-            proto::pub_key_resp_data d;
+            proto::identify_resp_data d;
             obj.convert(d);
 
             if(p_.id != util::hash(d.k)) {
@@ -531,7 +533,8 @@ void node::pub_key(peer p, pub_key_callback ok, basic_callback bad) {
             crypto.ks_put(p_.id, d.k);
 
             // verify if signature for token is correct
-            if(crypto.verify(p_.id, token, d.s))
+            std::string blob = fmt::format("{}:{}:{}", token, net.get_ip_address(), net.port);
+            if(crypto.verify(p_.id, blob, d.s))
                 ok(p_, s);
             else
                 bad(p_);
@@ -574,22 +577,22 @@ void node::get_addresses(peer p, hash_t target_id, get_addresses_callback ok, ba
         bad);
 }
 
-std::future<std::string> node::_pub_key(peer p) {
+std::future<std::string> node::_identify(peer p) {
     std::shared_ptr<std::promise<std::string>> prom = std::make_shared<std::promise<std::string>>();
     std::future<std::string> fut = prom->get_future();
 
-    pub_key(p,
+    identify(p,
         [&, prom](peer, std::string s) { prom->set_value(s); },
-        [&, prom](peer) { prom->set_value(""); });
+        [&, prom](peer) { spdlog::info("couldnt get pubkey"); prom->set_value(""); });
 
     return fut;
 }
 
-bool node::acquire_pub_key(peer p) {
+bool node::identify_node(peer p) {
     // acquire pubkey if not already got
     if(!crypto.ks_has(p.id)) {
-        // send pub_key first, if fails to acquire, return bad
-        std::future<std::string> fs = _pub_key(p);
+        // send identify first, if fails to acquire, return bad
+        std::future<std::string> fs = _identify(p);
         std::string s = fs.get();
 
         if(s.empty())
@@ -603,7 +606,7 @@ std::future<node::fut_t> node::_lookup(bool fv, peer p, hash_t target_id) {
     std::shared_ptr<std::promise<fut_t>> prom = std::make_shared<std::promise<fut_t>>();
     std::future<fut_t> fut = prom->get_future();
     
-    if(!acquire_pub_key(p)) {
+    if(!identify_node(p)) {
         prom->set_value(fut_t{p, fv_value{boost::blank()}});
         return fut;
     }
@@ -742,7 +745,7 @@ node::fv_value node::lookup_value(
                 store(false, p, best, basic_nothing, basic_nothing);
             }
 
-            acquire_pub_key(best.origin);
+            identify_node(best.origin);
 
             return best;
         }
