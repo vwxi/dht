@@ -54,7 +54,7 @@
 #define W_LOCK(m) boost::upgrade_lock<boost::shared_mutex> write_lock(m);
 #define TIME_NOW() duration_cast<seconds>(system_clock::now().time_since_epoch()).count()
 
-namespace tulip {
+namespace lotus {
 
 typedef std::uint64_t u64; 
 typedef std::uint32_t u32;
@@ -89,6 +89,7 @@ const int disjoint_paths = 3; // number of disjoint paths to take for lookups
 const int key_size = 2048; // size of public/private keys in bytes
 const int quorum = 3; // quorum for alternative lookup procedure (lp_lookup)
 const int token_length = 32; // length of secret tokens
+const int table_entry_addr_limit = 10; // max number of addrs allowed for one table entry
 
 }
 
@@ -97,7 +98,6 @@ namespace constants {
 const int upnp_release_interval = 14400; // number of seconds between each upnp port re-leasing
 
 }
-
 
 typedef boost::multiprecision::number<
     boost::multiprecision::cpp_int_backend<
@@ -116,6 +116,85 @@ typedef boost::random::independent_bits_engine<
 typedef std::independent_bits_engine<
     std::default_random_engine, CHAR_BIT, unsigned char> token_reng_t;
 
+struct net_addr {
+    typedef boost::variant<tcp::endpoint, udp::endpoint> endp;
+
+    enum {
+        t_udp,
+        t_tcp
+    } transport_type;
+
+    std::string addr;
+    u16 port;
+
+    net_addr() : transport_type(t_udp), addr(), port(0) {  }
+    net_addr(std::string t, std::string a, u16 p) : addr(a), port(p) {
+        if(t == "udp") transport_type = t_udp;
+        else if(t == "tcp") transport_type = t_tcp;
+    }
+
+    udp::endpoint udp_endpoint() const {
+        return udp::endpoint{boost::asio::ip::address::from_string(addr), port};
+    }
+
+    tcp::endpoint tcp_endpoint() const {
+        return tcp::endpoint{boost::asio::ip::address::from_string(addr), port};
+    }
+
+    bool operator==(const net_addr& rhs) const {
+        return transport_type == rhs.transport_type && addr == rhs.addr && port == rhs.port; 
+    }
+
+    std::string transport() const {
+        switch(transport_type) {
+        case t_udp: return "udp";
+        case t_tcp: return "tcp";
+        default: return "unknown";
+        }
+    }
+
+    std::string to_string() const {
+        return fmt::format("{}:{}:{}", transport(), addr, port);
+    }
+};
+
+// for outgoing messages or internal work
+struct routing_table_entry {
+    typedef std::pair<net_addr, int> mi_addr;
+
+    hash_t id;
+    std::vector<mi_addr> addresses;
+
+    routing_table_entry(hash_t i, net_addr a) :
+        id(i), addresses{ { a, 0 } } { }
+};
+
+// object used for individual networking operations.
+// basically for incoming messages
+struct net_peer {
+    hash_t id;
+    net_addr addr;
+
+    net_peer(hash_t id_, net_addr addr_) : id(id_), addr(addr_) { }
+    bool operator==(const net_peer& rhs) { return id == rhs.id && addr == rhs.addr; }
+} static empty_net_peer{ 0, net_addr("", "", 0) };
+
+// for when we've resolved a net_peer from routing_table
+struct net_contact {
+    hash_t id;
+    std::vector<net_addr> addresses;
+
+    net_contact() : id(0), addresses() { }
+    net_contact(hash_t id_, std::vector<net_addr> addrs) : id(id_), addresses(addrs) { }
+    net_contact(const net_peer& p) : id(p.id), addresses{ p.addr } { }
+    net_contact(const routing_table_entry& rte) : id(rte.id) {
+        for(auto a : rte.addresses)
+            addresses.push_back(a.first);
+    }
+
+    bool operator==(const net_contact& c) { return c.id == id; }
+};
+
 namespace util { // utilities
 
 static u64 time_now() {
@@ -133,13 +212,13 @@ static std::string string_format( const std::string& format, Args ... args )
     return std::string( buf.get(), buf.get() + size - 1 );
 }
 
-static std::string htos(hash_t h) {
-    std::stringstream ss;
-    ss << std::hex;
-    ss << "0x";
-    ss << h;
-    return ss.str();
-}
+// static std::string htos(hash_t h) {
+//     std::stringstream ss;
+//     ss << std::hex;
+//     ss << "0x";
+//     ss << h;
+//     return ss.str();
+// }
 
 static u64 msg_id() {
     u64 r = rand();
@@ -299,6 +378,10 @@ static hash_t b58decode_h(std::string s) {
     }
 
     return result;
+}
+
+static std::string htos(hash_t h) {
+    return b58encode_h(h);
 }
 
 }

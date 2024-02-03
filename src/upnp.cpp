@@ -1,6 +1,6 @@
 #include "upnp.h"
 
-namespace tulip {
+namespace lotus {
 namespace dht {
 
 // looking at miniupnpc/src/upnpc.c

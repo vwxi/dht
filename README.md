@@ -17,7 +17,7 @@ basic usage (src/main.cpp):
 int main(int argc, char** argv) {
     spdlog::set_level(spdlog::level::debug);
     spdlog::set_pattern("[%P] [%H:%M:%S] [%^%l%$] %v");
-    using namespace tulip::dht;
+    using namespace lotus::dht;
 
     // ctor starts networking
     switch(std::atoi(argv[1])) {

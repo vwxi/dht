@@ -4,12 +4,12 @@
 #include "routing.h"
 #include "util.hpp"
 
-namespace tulip {
+namespace lotus {
 namespace dht {
 
 /// message queue
 
-void msg_queue::await(peer p, u64 msg_id, q_callback ok, f_callback bad) {
+void msg_queue::await(net_peer p, u64 msg_id, q_callback ok, f_callback bad) {
     LOCK(mutex);
 
     items.emplace_back(p, msg_id, false);
@@ -21,7 +21,7 @@ void msg_queue::await(peer p, u64 msg_id, q_callback ok, f_callback bad) {
 void msg_queue::wait(std::list<item>::iterator it, q_callback ok, f_callback bad) {
     try {
         if(it == items.end()) {
-            bad(peer());
+            bad(empty_net_peer);
             return; // bad iterator
         }
 
@@ -29,7 +29,7 @@ void msg_queue::wait(std::list<item>::iterator it, q_callback ok, f_callback bad
         std::future_status fs = fut.wait_for(seconds(proto::net_timeout));
         
         // since every action is one query-response we don't need to feed callback the message ID
-        peer req;
+        net_peer req(empty_net_peer);
 
         {
             LOCK(mutex);
@@ -58,53 +58,50 @@ void msg_queue::wait(std::list<item>::iterator it, q_callback ok, f_callback bad
     }
 }
 
-void msg_queue::satisfy(peer p, u64 msg_id, std::string data) {
+void msg_queue::satisfy(net_peer p, u64 msg_id, std::string data) {
     LOCK(mutex);
 
     auto it = std::find_if(items.begin(), items.end(),
-        [&](const item& i) { return i.req == p && i.msg_id == msg_id && !i.satisfied; });
+        [&](const item& i) { 
+            return (i.req.id == p.id || 
+                i.req.addr == p.addr) && 
+                i.msg_id == msg_id && 
+                !i.satisfied; 
+        });
 
-    if(it == items.end()) {
+    if(it == items.end())
         return;
-    }
 
     it->satisfied = true;
     it->req = p;
     it->promise.set_value(data);
 }
 
-bool msg_queue::pending(peer p, u64 msg_id) {
+bool msg_queue::pending(net_peer p, u64 msg_id) {
     LOCK(mutex);
 
     auto it = std::find_if(items.begin(), items.end(),
-        [&](const item& i) { return i.req == p && i.msg_id == msg_id && !i.satisfied; });
+        [&](const item& i) { 
+            return i.req.addr == p.addr && 
+                i.msg_id == msg_id && 
+                !i.satisfied;  
+        });
 
     return it != items.end();
 }
 
 /// networking
 
-network::network(
-    bool local_,
-    u16 p,
-    m_callback handle_ping_,
-    m_callback handle_store_,
-    m_callback handle_find_node_,
-    m_callback handle_find_value_,
-    m_callback handle_identify_) :
+network::network(bool local_, u16 p, h_callback handler) :
     local(local_),
     port(p),
     socket(ioc, udp::endpoint(udp::v4(), p)),
     upnp_(false), // TODO: consider ipv6 addition?
-    handle_ping(handle_ping_),
-    handle_store(handle_store_),
-    handle_find_node(handle_find_node_),
-    handle_find_value(handle_find_value_),
-    handle_identify(handle_identify_) { }
+    message_handler(handler) { }
 
 network::~network() {
-    release_thread.join();
-    ioc_thread.join();
+    if(release_thread.joinable()) release_thread.join();
+    if(ioc_thread.joinable()) ioc_thread.join();
 }
 
 void network::run() {
@@ -162,20 +159,18 @@ void network::handle(std::string buf, udp::endpoint ep) {
 
         proto::message msg = obj.as<proto::message>();
 
-        peer p("udp", ep.address().to_string(), ep.port(), util::b58decode_h(msg.i));
-        
-        // if there's already a response pending, drop this one
-        if(msg.m == proto::type::query && queue.pending(p, msg.q))
-            return;
+        net_peer p{ util::b58decode_h(msg.i), net_addr("udp", ep.address().to_string(), ep.port()) };
 
-        switch(msg.a) {
-        case proto::actions::ping: handle_ping(std::move(p), std::move(msg)); break;
-        case proto::actions::store: handle_store(std::move(p), std::move(msg)); break;
-        case proto::actions::find_node: handle_find_node(std::move(p), std::move(msg)); break;
-        case proto::actions::find_value: handle_find_value(std::move(p), std::move(msg)); break;
-        case proto::actions::identify: handle_identify(std::move(p), std::move(msg)); break;
+        // if there's already a response pending, drop this one
+        // except if it's an identify request
+        if(msg.m == proto::type::query && 
+            queue.pending(p, msg.q) && 
+            msg.a != proto::actions::identify) {
+            return;
         }
-    } catch (std::exception& e) { }
+
+        message_handler(std::move(p), std::move(msg));
+    } catch (std::exception& e) { spdlog::debug("exception caught: {}", e.what()); }
 }
 
 

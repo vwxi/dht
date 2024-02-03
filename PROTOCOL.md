@@ -24,6 +24,7 @@ as defined in `include/dht/util.hpp` and `include/dht/proto.h`:
 - size of public/private keys in bytes (`key_size`) (default: 2048)
 - quorum for alternative lookups (`quorum`) (default: 3)
 - length of secret tokens (`token_length`) (default: 32)
+- maximum number of addresses allowed for a single ID (`table_entry_addr_limit`) (default: 10)
 
 ## messages
 
@@ -35,6 +36,7 @@ one message per client should be handled at any time. a client should not have m
 - messages missing any of these elements will be discarded  
 - messages larger than the maximum allowed size will be discarded
 - sending a query before sending back a response will cause the query to be discarded
+  - ***EXCEPTION:*** for public key exchanges from messages like `identify` 
 
 
 ```
@@ -430,7 +432,8 @@ as seen above in the `find_node` response.
 
 this message is very simple. peer queries for public key in BER(?) key format (used in crypto++).  this function will also validate a peer's IP address.
 
-this message should be sent to peers before querying for closest nodes or key-value pairs to validate  
+if a key does not exist in the keystore for the node ID, then an identify query should be sent to the sending node as to acquire their public key. if there were complications in the process or the key was invalid, the node's request should be ignored entirely.
+
 message and key-value signatures.
 
 #### action-specific data

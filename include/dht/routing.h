@@ -4,11 +4,10 @@
 #include "util.hpp"
 #include "bucket.h"
 
-namespace tulip {
+namespace lotus {
 namespace dht {
 
 struct tree;
-class peer;
 class node;
 
 class routing_table : public std::enable_shared_from_this<routing_table> {
@@ -21,15 +20,12 @@ public:
     void traverse(bool, hash_t, tree**, int&);
     void dfs(std::function<void(tree*)>);
     void split(tree*, int);
-    void update(peer);
-    void evict(peer);
-    void update_pending(peer);
-    bucket find_bucket(peer);
-    bucket& find_bucket_ref(peer);
-    std::deque<peer> find_alpha(peer);
-    boost::optional<peer> find(hash_t);
-    int stale(peer);
-    
+    void update(net_peer);
+    void stale(net_peer);
+    bucket& find_bucket(hash_t);
+    std::deque<routing_table_entry> find_alpha(hash_t);
+    boost::optional<routing_table_entry> find(hash_t);
+
     hash_t id;
     
     network& net;
@@ -54,9 +50,6 @@ struct tree {
     } prefix;
     bucket data;
     bool leaf;
-
-    std::list<peer> cache;
-    std::mutex cache_mutex;
 
     tree(std::shared_ptr<routing_table>);
     ~tree();

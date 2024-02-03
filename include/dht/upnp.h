@@ -3,7 +3,7 @@
 
 #include "util.hpp"
 
-namespace tulip {
+namespace lotus {
 namespace dht {
 
 struct port_mapping {
