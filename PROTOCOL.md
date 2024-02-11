@@ -97,7 +97,14 @@ can be handled differently:
   - this is just raw data, to be interpreted by clients
 - provider record (`0x01`)
   - this is like a pointer to data, pointing to a peer that will provide this data.
-    the data itself is simply a serialized peer object.
+  - the format is as follows:
+    ```
+    { "i": <provider id>, "e": <expiry time>, "s": <signature> }
+    ```
+  - the provider ID can be resolved using the `get_addresses` message
+  - after `republish_time` seconds, the provider record is considered expired. 
+  - signature signs the following data format: `<provider id>:<expiry time>`
+  - recipients should reject provider records past expiry date, with an invalid signature or from an ID that cannot be resolved.
 
 #### enc-string
 
