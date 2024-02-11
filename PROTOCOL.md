@@ -58,7 +58,13 @@ peer objects are formatted like so:
 { "t": <transport>, "a": <address>, "p": <port>, "i": <enc-string> }
 ```
 
-transport is a string, either "udp" or "tcp", denoting transport protocol to be used
+address objects are formatted like so:
+
+```
+{ "t": <transport>, "a": <address>, "p": <port> }
+```
+
+where transport is a string, either "udp" or "tcp", denoting transport protocol to be used
 
 #### schema version
 
@@ -92,14 +98,6 @@ can be handled differently:
 - provider record (`0x01`)
   - this is like a pointer to data, pointing to a peer that will provide this data.
     the data itself is simply a serialized peer object.
-- peer record (`0x02`)
-  - this is a signed record attributing a peer ID to an IP address
-  - they follow the following format:
-    ```
-    { "t": <transport>, "a": <address>, "p": <port>, "s": <signature> }
-    ```
-    - where transport is a string (`udp` or `tcp`) denoting which transport protocol to use and the signature is raw binary data signing the following format: `transport:ip:port`
-
 
 #### enc-string
 
@@ -432,7 +430,9 @@ as seen above in the `find_node` response.
 
 this message is very simple. peer queries for public key in BER(?) key format (used in crypto++).  this function will also validate a peer's IP address.
 
-if a key does not exist in the keystore for the node ID, then an identify query should be sent to the sending node as to acquire their public key. if there were complications in the process or the key was invalid, the node's request should be ignored entirely.
+if a key does not exist in the keystore for the node ID, then an identify query should be sent to the sending node as to acquire their public key. if there were complications in the process or the key was invalid, the node's request should be ignored entirely.  
+
+this message does not update the routing table.
 
 message and key-value signatures.
 
@@ -489,7 +489,8 @@ where:
 ### get_addresses (`0x05`)
 
 this message attempts to obtain valid peer records for a given peer ID from a node. responses must be peer records with valid signatures.  
-this message does not update the routing table.
+this message does not update the routing table.  
+on the client side, all obtained records should be externally validated (by identifying them) 
 
 #### action-specific data
 

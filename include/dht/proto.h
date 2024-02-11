@@ -54,8 +54,8 @@ struct peer_object {
     MSGPACK_DEFINE_MAP(t, a, p, i);
     peer_object() { }
     peer_object(std::string t_, std::string a_, int p_, std::string i_) : t(t_), a(a_), p(p_), i(i_) { }
-    peer_object(net_peer p_) : t(p_.addr.transport()), a(p_.addr.addr), p(p_.addr.port), i(util::b58encode_h(p_.id)) { }
-    net_peer to_peer() const { return net_peer{ util::b58decode_h(i), net_addr(t, a, p) }; }
+    peer_object(net_peer p_) : t(p_.addr.transport()), a(p_.addr.addr), p(p_.addr.port), i(dec(p_.id)) { }
+    net_peer to_peer() const { return net_peer{ enc(i), net_addr(t, a, p) }; }
 };
 
 struct stored_data {
@@ -121,12 +121,13 @@ struct identify_resp_data {
 
 // get_addresses
 
-struct get_addresses_peer_record {
+struct address_object {
     std::string t;
     std::string a;
-    int p;
-    std::string s;
-    MSGPACK_DEFINE_MAP(t, a, p, s);
+    std::string p;
+    address_object() {  }
+    address_object(net_addr ad) : t(ad.transport()), a(ad.addr), p(std::to_string(ad.port)) { } 
+    MSGPACK_DEFINE_MAP(t, a, p);
 };
 
 struct get_addresses_query_data {
@@ -136,7 +137,7 @@ struct get_addresses_query_data {
 
 struct get_addresses_resp_data {
     std::string i;
-    std::vector<get_addresses_peer_record> p;
+    std::vector<address_object> p;
     MSGPACK_DEFINE_MAP(i, p);
 };
 

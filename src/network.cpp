@@ -34,7 +34,7 @@ void msg_queue::wait(std::list<item>::iterator it, q_callback ok, f_callback bad
         {
             LOCK(mutex);
             req = it->req;
-            items.erase(it);
+            it = items.erase(it);
         }
 
         switch(fs) {
@@ -159,7 +159,7 @@ void network::handle(std::string buf, udp::endpoint ep) {
 
         proto::message msg = obj.as<proto::message>();
 
-        net_peer p{ util::b58decode_h(msg.i), net_addr("udp", ep.address().to_string(), ep.port()) };
+        net_peer p{ enc(msg.i), net_addr("udp", ep.address().to_string(), ep.port()) };
 
         // if there's already a response pending, drop this one
         // except if it's an identify request

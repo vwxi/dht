@@ -177,6 +177,7 @@ struct net_peer {
 
     net_peer(hash_t id_, net_addr addr_) : id(id_), addr(addr_) { }
     bool operator==(const net_peer& rhs) { return id == rhs.id && addr == rhs.addr; }
+    bool operator!=(const net_peer& rhs) { return !(*this == rhs); }
 } static empty_net_peer{ 0, net_addr("", "", 0) };
 
 // for when we've resolved a net_peer from routing_table
@@ -384,6 +385,16 @@ static std::string htos(hash_t h) {
     return b58encode_h(h);
 }
 
+}
+
+// aliases
+
+static hash_t enc(std::string s) {
+    return util::b58decode_h(s);
+}
+
+static std::string dec(hash_t h) {
+    return util::b58encode_h(h);
 }
 
 }

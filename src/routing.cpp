@@ -100,29 +100,30 @@ void routing_table::update(net_peer req) {
     W_LOCK(mutex);
 
     hash_t mask(~hash_t(0) << (proto::bit_hash_width - cutoff));
-    
-    if(ptr->data.size() < ptr->data.max_size) {
-        // bucket is not full, update node
-        if(it == ptr->data.end())
-            ptr->data.add_new(req);
+
+    if(it == ptr->data.end() && ptr->data.size() < ptr->data.max_size) {
+        // bucket is not full and peer doesnt exist yet, add to bucket
+        ptr->data.add_new(req);
     } else {
-        if((req.id & mask) == (id & mask)) {
-            if(it == ptr->data.end()) {
-                spdlog::debug("routing: bucket is within prefix, split");
-                // bucket is full and within our own prefix, split
-                /// @todo relaxed splitting, see https://stackoverflow.com/questions/32129978/highly-unbalanced-kademlia-routing-table/32187456#32187456
-                split(ptr, cutoff);
+        if(it != ptr->data.end()) {
+            if((req.id & mask) == (id & mask)) {
+                if(it == ptr->data.end()) {
+                    spdlog::debug("routing: bucket is within prefix, split");
+                    // bucket is full and within our own prefix, split
+                    /// @todo relaxed splitting, see https://stackoverflow.com/questions/32129978/highly-unbalanced-kademlia-routing-table/32187456#32187456
+                    split(ptr, cutoff);
+                } else {
+                    // bucket is full but nearby, update node
+                    ptr->data.update_near_entry(req);
+                }
             } else {
-                // bucket is full but nearby, update node
-                ptr->data.update_near_entry(req);
-            }
-        } else {
-            if(it != ptr->data.end()) {
-                // node is known to us already but far so ping to check liveness
-                ptr->data.update_far_entry(req);
-            } else {
-                // add/update entry in replacement cache
-                ptr->data.update_cache(req);
+                if(it != ptr->data.end()) {
+                    // node is known to us already but far so ping to check liveness
+                    ptr->data.update_far_entry(req);
+                } else {
+                    // add/update entry in replacement cache
+                    ptr->data.update_cache(req);
+                }
             }
         }
     }

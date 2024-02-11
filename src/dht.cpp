@@ -33,7 +33,7 @@ void node::_run() {
     table_ref = table;
     table->init();
 
-    spdlog::debug("dht: running DHT node on port {} (id: {})", net.port, util::b58encode_h(id));
+    spdlog::debug("dht: running DHT node on port {} (id: {})", net.port, dec(id));
     
     running = true;
 
@@ -108,13 +108,16 @@ void node::_handler(net_peer peer, proto::message msg) {
     case proto::actions::identify: 
         handle_identify(std::move(peer), std::move(msg)); 
         break;
+    case proto::actions::get_addresses:
+        handle_get_addresses(std::move(peer), std::move(msg)); 
+        break;
     }
 }
 
 void node::handler(net_peer peer, proto::message msg) {
     // identify before any query
     if(!crypto.ks_has(peer.id) && msg.a != proto::actions::identify) {
-        identify(peer, 
+        identify(resolve_peer_in_table(peer), 
             [this, msg](net_peer peer, std::string key) {
                 _handler(std::move(peer), std::move(msg));
             },
@@ -140,7 +143,7 @@ void node::handle_store(net_peer peer, proto::message msg) {
         proto::store_query_data d;
         msg.d.convert(d);
 
-        hash_t k(util::b58decode_h(d.k));
+        hash_t k(enc(d.k));
         u32 chksum = util::crc32b((u8*)d.v.data());
 
         int s = proto::status::ok;
@@ -178,7 +181,7 @@ void node::handle_find_node(net_peer peer, proto::message msg) {
         proto::find_query_data d;
         msg.d.convert(d);
 
-        hash_t target_id(util::b58decode_h(d.t));
+        hash_t target_id(enc(d.t));
         const bucket& bkt = table->find_bucket(target_id);
 
         std::vector<proto::peer_object> b;
@@ -189,7 +192,7 @@ void node::handle_find_node(net_peer peer, proto::message msg) {
                     a.first.transport(), 
                     a.first.addr, 
                     a.first.port, 
-                    util::b58encode_h(target_id)
+                    dec(target_id)
                 );
             }
         }
@@ -210,7 +213,6 @@ void node::handle_find_node(net_peer peer, proto::message msg) {
         table->update(peer);
     } else if(msg.m == proto::type::response) {
         proto::find_node_resp_data d;
-        bucket bkt(table);
         msgpack::object_handle oh;
 
         msg.d.convert(d);
@@ -230,7 +232,7 @@ void node::handle_find_value(net_peer peer, proto::message msg) {
         proto::find_query_data d;
         msg.d.convert(d);
 
-        hash_t target_id(util::b58decode_h(d.t));
+        hash_t target_id(enc(d.t));
 
         {
             LOCK(ht_mutex);
@@ -259,7 +261,7 @@ void node::handle_find_value(net_peer peer, proto::message msg) {
                             a.first.transport(), 
                             a.first.addr, 
                             a.first.port, 
-                            util::b58encode_h(target_id)
+                            dec(target_id)
                         );
                     }
                 }
@@ -311,7 +313,7 @@ void node::handle_identify(net_peer peer, proto::message msg) {
     } else if(msg.m == proto::type::response) {
         proto::identify_resp_data d;
         msg.d.convert(d);
-
+        
         // hacky, repack
         std::stringstream ss;
         msgpack::pack(ss, d);
@@ -319,6 +321,43 @@ void node::handle_identify(net_peer peer, proto::message msg) {
         net.queue.satisfy(peer, msg.q, ss.str());
 
         /// @note identify does not update table
+    }
+}
+
+void node::handle_get_addresses(net_peer peer, proto::message msg) {
+    if(msg.m == proto::type::query) {
+        proto::get_addresses_query_data d;
+        msg.d.convert(d);
+
+        std::vector<proto::address_object> addrs;
+
+        hash_t target_id = enc(d.i);
+        boost::optional<routing_table_entry> c = table->find(target_id);
+        
+        if(c.has_value()) {
+            for(auto a : c.value().addresses) {
+                addrs.emplace_back(a.first);
+            }
+        }
+
+        net.send(false,
+            peer.addr, proto::type::response, proto::actions::get_addresses,
+            id, msg.q, proto::get_addresses_resp_data{
+                .i = d.i,
+                .p = addrs
+            },
+            net.queue.q_nothing, net.queue.f_nothing);
+    } else if(msg.m == proto::type::response) {
+        proto::get_addresses_resp_data d;
+        msg.d.convert(d);
+
+        // hacky, repack
+        std::stringstream ss;
+        msgpack::pack(ss, d);
+
+        net.queue.satisfy(peer, msg.q, ss.str());
+
+        /// @note get_addresses does not update table
     }
 }
 
@@ -356,7 +395,7 @@ void node::provide(std::string key, net_peer provider) {
     iter_store(proto::store_type::provider_record, key, ss.str());
 }
 
-void node::get_providers(std::string key, prov_callback cb) {
+void node::get_providers(std::string key, contacts_callback cb) {
     get(key, [this, cb](std::vector<kv> values) {
         std::vector<net_contact> providers;
 
@@ -379,9 +418,9 @@ void node::get_providers(std::string key, prov_callback cb) {
 
 /// async actions
 
-void node::ping(net_peer p, basic_callback ok, basic_callback bad) {
+void node::ping(net_contact contact, basic_callback ok, basic_callback bad) {
     net.send(true,
-        p.addr, proto::type::query, proto::actions::ping,
+        contact.addresses, proto::type::query, proto::actions::ping,
         id, util::msg_id(), msgpack::type::nil_t(),
         [this, ok](net_peer p_, std::string s) { 
             table->update(p_);
@@ -406,7 +445,7 @@ void node::store(bool origin, net_contact p, kv val, basic_callback ok, basic_ca
     net.send(true,
         p.addresses, proto::type::query, proto::actions::store,
         id, util::msg_id(), proto::store_query_data{ 
-            .k = util::b58encode_h(val.key), 
+            .k = dec(val.key), 
             .d = val.type,
             .v = val.value, 
             .o = po,
@@ -436,7 +475,7 @@ void node::store(bool origin, net_contact p, kv val, basic_callback ok, basic_ca
 void node::find_node(net_contact p, hash_t target_id, bucket_callback ok, basic_callback bad) {
     net.send(true,
         p.addresses, proto::type::query, proto::actions::find_node,
-        id, util::msg_id(), proto::find_query_data { .t = util::b58encode_h(target_id) },
+        id, util::msg_id(), proto::find_query_data { .t = dec(target_id) },
         [this, ok, bad](net_peer p_, std::string s) {
             net_contact c = resolve_peer_in_table(p_);
 
@@ -449,7 +488,7 @@ void node::find_node(net_contact p, hash_t target_id, bucket_callback ok, basic_
             std::list<net_contact> l;
 
             for(auto i : b.b)
-                l.emplace_back(net_peer(util::b58decode_h(i.i), net_addr(i.t, i.a, i.p)));
+                l.emplace_back(net_peer(enc(i.i), net_addr(i.t, i.a, i.p)));
 
             // verify signature
             std::stringstream ss;
@@ -474,7 +513,7 @@ void node::find_node(net_contact p, hash_t target_id, bucket_callback ok, basic_
 void node::find_value(net_contact p, hash_t target_id, find_value_callback ok, basic_callback bad) {
     net.send(true,
         p.addresses, proto::type::query, proto::actions::find_value,
-        id, util::msg_id(), proto::find_query_data { .t = util::b58encode_h(target_id) },
+        id, util::msg_id(), proto::find_query_data { .t = dec(target_id) },
         [this, ok, bad, target_id](net_peer p_, std::string s) {
             net_contact c = resolve_peer_in_table(p_);
 
@@ -492,7 +531,7 @@ void node::find_value(net_contact p, hash_t target_id, find_value_callback ok, b
                     std::list<net_contact> l;
 
                     for(auto i : d.b.value().b)
-                        l.emplace_back(net_peer(util::b58decode_h(i.i), net_addr(i.t, i.a, i.p)));
+                        l.emplace_back(net_peer(enc(i.i), net_addr(i.t, i.a, i.p)));
 
                     // verify signature
                     std::stringstream ss;
@@ -519,11 +558,11 @@ void node::find_value(net_contact p, hash_t target_id, find_value_callback ok, b
         });
 }
 
-void node::identify(net_peer p, identify_callback ok, basic_callback bad) {
+void node::identify(net_contact contact, identify_callback ok, basic_callback bad) {
     std::string token = util::gen_token(treng);
 
     net.send(true,
-        p.addr, proto::type::query, proto::actions::identify,
+        contact.addresses, proto::type::query, proto::actions::identify,
         id, util::msg_id(), proto::identify_query_data {
             .s = token
         },
@@ -545,8 +584,69 @@ void node::identify(net_peer p, identify_callback ok, basic_callback bad) {
 
             // verify if signature for token is correct
             std::string blob = fmt::format("{}:{}:{}", token, net.get_ip_address(), net.port);
-            if(crypto.verify(p_.id, blob, d.s)) ok(p_, d.k);
-            else bad(p_);
+            if(crypto.verify(p_.id, blob, d.s)) {
+                ok(p_, d.k);
+            } else bad(p_);
+        },
+        [this, bad](net_peer p_) {
+            bad(p_);
+        });
+}
+
+std::future<net_peer> node::_verify_node(net_peer peer) {
+    std::shared_ptr<std::promise<net_peer>> prom = std::make_shared<std::promise<net_peer>>();
+    std::future<net_peer> fut = prom->get_future();
+
+    identify(resolve_peer_in_table(peer),
+        [prom](net_peer p_, std::string) {
+            prom->set_value(p_);
+        },
+        [prom](net_contact) {
+            prom->set_value(empty_net_peer);
+        });
+
+    return fut;
+}
+
+void node::get_addresses(net_contact contact, hash_t target_id, addresses_callback ok, basic_callback bad) {
+    net.send(true,
+        contact.addresses, proto::type::query, proto::actions::get_addresses,
+        id, util::msg_id(), proto::get_addresses_query_data{
+            .i = dec(target_id)
+        },
+        [this, ok, bad, target_id](net_peer peer, std::string s) {
+            net_contact c = resolve_peer_in_table(peer);
+
+            msgpack::object_handle oh;
+            msgpack::unpack(oh, s.data(), s.size());
+            msgpack::object obj = oh.get();
+            proto::get_addresses_resp_data d;
+            obj.convert(d);
+
+            std::vector<std::future<net_peer>> tasks;
+            std::list<net_peer> valid_peers;
+
+            net_addr our_addr("udp", net.get_ip_address(), net.port);
+
+            for(auto a : d.p) {
+                try {
+                    net_peer peer(target_id, net_addr(a.t, a.a, std::atoi(a.p.c_str())));
+                    if(peer.addr == our_addr) continue;
+                    tasks.push_back(_verify_node(peer));
+                } catch (std::exception&) { }
+            }
+
+            for(auto&& t : tasks) {
+                net_peer p = t.get();
+
+                // if the address does in fact correspond to the ID, 
+                // "resolve" (find in table and add new address) then add to valid list
+                if(p != empty_net_peer) {
+                    valid_peers.push_back(p);
+                }
+            }
+
+            ok(c, valid_peers);
         },
         [this, bad](net_peer p_) {
             table->stale(p_);
@@ -714,7 +814,7 @@ node::fv_value node::lookup_value(
 
             // storing `best` at `po` nodes
             for(auto p : po) {
-                spdlog::debug("dht: storing best value at {}", util::b58encode_h(p.id));
+                spdlog::debug("dht: storing best value at {}", dec(p.id));
                 store(false, p, best, basic_nothing, basic_nothing);
             }
 
@@ -739,10 +839,10 @@ node::fv_value node::lookup_value(
                     claimed.get()->shortlist.end(),
                     p) == 0) {
                     claimed.get()->shortlist.push_back(p);
-                    spdlog::debug("dht: disjoint: {} not seen, adding to claimed list", util::b58encode_h(p.id));
+                    spdlog::debug("dht: disjoint: {} not seen, adding to claimed list", dec(p.id));
                 } else {
                     // if seen already, we exclude this "claimed" peer
-                    spdlog::debug("dht: disjoint: {} seen already, excluding, {}", util::b58encode_h(p.id));
+                    spdlog::debug("dht: disjoint: {} seen already, excluding, {}", dec(p.id));
                     if(n > 0)
                         n--;
                     continue;
@@ -752,7 +852,7 @@ node::fv_value node::lookup_value(
             // `pending` should never be larger than `alpha`
             pending++;
             tasks.push_back(_lookup(true, p, key));
-            spdlog::debug("dht: querying {}...", util::b58encode_h(p.id));
+            spdlog::debug("dht: querying {}...", dec(p.id));
             
             // mark it as queried in `pq`
             pq.push_back(p);
@@ -774,11 +874,11 @@ node::fv_value node::lookup_value(
 
             // if an error or timeout occurs, discard it
             if(v.type() == typeid(boost::blank)) {
-                spdlog::debug("dht: timeout/error from {}, discarding.", util::b58encode_h(p.id));        
+                spdlog::debug("dht: timeout/error from {}, discarding.", dec(p.id));        
                 continue;
             }
 
-            spdlog::debug("dht: message back from {} ->", util::b58encode_h(p.id));
+            spdlog::debug("dht: message back from {} ->", dec(p.id));
 
             // if without value, add not already queried/to be queried closest nodes to `pn`
             if(v.type() == typeid(std::list<net_contact>)) {
@@ -790,7 +890,7 @@ node::fv_value node::lookup_value(
                     if(std::count(pq.begin(), pq.end(), p_) == 0 &&
                         std::count(pn.begin(), pn.end(), p_) == 0 &&
                         p_.id != id) {
-                        spdlog::debug("dht: \t\tpeer {}", util::b58encode_h(p.id));
+                        spdlog::debug("dht: \t\tpeer {}", dec(p.id));
                         pn.push_back(p_);
                     }
                 }
@@ -831,7 +931,7 @@ node::fv_value node::lookup_value(
                             spdlog::debug("dht: \t\t\tnew value wins, marking peers as outdated ->");
 
                             for(auto o : pb) {
-                                spdlog::debug("dht: \t\t\t\tmarking peer {} as outdated", util::b58encode_h(o.id));
+                                spdlog::debug("dht: \t\t\t\tmarking peer {} as outdated", dec(o.id));
                                 po.push_back(o);
                             }
                             
@@ -940,6 +1040,44 @@ void node::join(net_addr a, basic_callback ok, basic_callback bad) {
 
         ok(c);
     }, bad);
+}
+
+void node::resolve(hash_t target_id, basic_callback ok, basic_callback bad) {
+    std::list<net_contact> nodes = iter_find_node(target_id);
+    std::size_t sz = nodes.size();
+    std::shared_ptr<std::size_t> cnt = std::make_shared<std::size_t>(0);
+
+    nodes.erase(std::remove_if(nodes.begin(), nodes.end(),
+        [&](const net_contact& c) { return c.id == id; }), nodes.end());
+
+    if(nodes.empty())
+        bad(net_contact(target_id, {}));
+
+    for(auto n : nodes) {
+        get_addresses(n, target_id, 
+            [this, target_id, sz, cnt, ok, bad](net_contact c, std::list<net_peer> peers) {
+                peers.erase(std::remove_if(peers.begin(), peers.end(),
+                    [&](const net_peer& p) { return p.id != target_id || p.id == id; }),
+                    peers.end());
+
+                for(auto p : peers) {
+                    table->update(p);
+                }
+
+                boost::optional<routing_table_entry> rte = table->find(target_id);
+                if(!rte.has_value()) {
+                    bad(c);
+                    return;
+                }
+
+                if(++(*cnt) >= sz)
+                    ok(net_contact(rte.value()));
+            }, 
+            [this, sz, cnt, bad](net_contact c) {
+                (*cnt)++;
+                bad(c);
+            });
+    }
 }
 
 }

@@ -29,10 +29,10 @@ struct kv {
 
     std::string sig_blob() const {
         proto::sig_blob sb;
-        sb.k = util::b58encode_h(key); // k: key
+        sb.k = dec(key); // k: key
         sb.d = type; // d: store type
         sb.v = value; // v: value
-        sb.i = util::b58encode_h(origin.id); // i: origin ID
+        sb.i = dec(origin.id); // i: origin ID
         sb.t = timestamp; // t: timestamp
 
         std::stringstream ss;
@@ -46,11 +46,12 @@ class node {
 public:
     using basic_callback = std::function<void(net_contact)>;
     using value_callback = std::function<void(std::vector<kv>)>;
-    using prov_callback = std::function<void(std::vector<net_contact>)>;
+    using contacts_callback = std::function<void(std::vector<net_contact>)>;
 
     basic_callback basic_nothing = [](net_contact) { };
 
     node(bool, u16);
+    ~node();
 
     hash_t get_id() const;
     
@@ -59,20 +60,19 @@ public:
     void generate_keypair();
     void export_keypair(std::string, std::string);
 
-    ~node();
-
     void put(std::string, std::string);
     void get(std::string, value_callback);
     void provide(std::string, net_peer);
-    void get_providers(std::string, prov_callback);
-    
+    void get_providers(std::string, contacts_callback);
     void join(net_addr, basic_callback, basic_callback);
+    void resolve(hash_t, basic_callback, basic_callback);
     
 private:
     using fv_value = boost::variant<boost::blank, kv, std::list<net_contact>>;
     using bucket_callback = std::function<void(net_contact, std::list<net_contact>)>;
     using find_value_callback = std::function<void(net_contact, fv_value)>;
     using identify_callback = std::function<void(net_peer, std::string)>;
+    using addresses_callback = std::function<void(net_contact, std::list<net_peer>)>;
     using fut_t = std::tuple<net_contact, fv_value>;
 
     struct djc {
@@ -83,20 +83,6 @@ private:
     using lkp_t = std::function<fv_value(std::deque<net_contact>, std::shared_ptr<djc>, int)>;
 
     void _run();
-
-    void ping(net_peer, basic_callback, basic_callback);
-    void iter_store(int, std::string, std::string);
-    std::list<net_contact> iter_find_node(hash_t);
-    void identify(net_peer, identify_callback, basic_callback);
-
-    // lookup wrapper can take multiple addresses
-    std::future<fut_t> _lookup(bool, net_contact, hash_t);
-
-    // identify wrapper cannot since we dont have multiple to begin with
-    net_contact resolve_peer_in_table(net_peer);
-
-    std::list<net_contact> lookup_nodes(std::deque<net_contact>, hash_t);
-    fv_value lookup_value(std::deque<net_contact>, boost::optional<std::shared_ptr<djc>>, hash_t, int);
 
     std::list<node::fv_value> disjoint_lookup_value(hash_t target_id, int Q) {
         std::deque<routing_table_entry> initial = table->find_alpha(target_id);
@@ -138,7 +124,18 @@ private:
     void refresh(tree*);
     void republish(kv);
 
+    std::future<net_peer> _verify_node(net_peer);
+    std::future<fut_t> _lookup(bool, net_contact, hash_t);
+    net_contact resolve_peer_in_table(net_peer);
+    std::list<net_contact> lookup_nodes(std::deque<net_contact>, hash_t);
+    fv_value lookup_value(std::deque<net_contact>, boost::optional<std::shared_ptr<djc>>, hash_t, int);
+
     // async interfaces
+    void ping(net_contact, basic_callback, basic_callback);
+    void iter_store(int, std::string, std::string);
+    std::list<net_contact> iter_find_node(hash_t);
+    void identify(net_contact, identify_callback, basic_callback);
+    void get_addresses(net_contact, hash_t, addresses_callback, basic_callback);
     void store(bool, net_contact, kv, basic_callback, basic_callback);
     void find_node(net_contact, hash_t, bucket_callback, basic_callback);
     void find_value(net_contact, hash_t, find_value_callback, basic_callback);
@@ -151,9 +148,10 @@ private:
     void handle_find_node(net_peer, proto::message);
     void handle_find_value(net_peer, proto::message);
     void handle_identify(net_peer, proto::message);
+    void handle_get_addresses(net_peer, proto::message);
 
     hash_t id;
-    
+
     std::atomic_bool running;
 
     network net;
