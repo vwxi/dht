@@ -3,28 +3,19 @@
 
 #include "util.hpp"
 
-namespace tulip {
+namespace lotus {
 namespace dht {
 
-struct peer {
-    typedef boost::variant<tcp::endpoint, udp::endpoint> endp;
+struct peer_record {
+    net_addr address;
+    std::string signature;
+    
+    peer_record(std::string t, std::string a, u16 p, std::string s) :
+        address(t, a, p), signature(s) { }
 
-    std::string transport;
-    hash_t id;
-    std::string addr;
-    u16 port;
-    int staleness;
-    boost::optional<std::string> pub_key;
-
-    peer() = default;
-    peer(hash_t id_) : id(id_) { }
-    peer(std::string t, std::string a, u16 p, hash_t id_) : transport(t), addr(a), port(p), staleness(0), id(id_) { }
-    peer(std::string t, std::string a, u16 p) : transport(t), addr(a), port(p), staleness(0), id(0) { }
-    tcp::endpoint t_endpoint() const { return tcp::endpoint{boost::asio::ip::address::from_string(addr), port}; }
-    udp::endpoint u_endpoint() const { return udp::endpoint{boost::asio::ip::address::from_string(addr), port}; }
-    endp endpoint() const { return !transport.compare("udp") ? endp(u_endpoint()) : (!transport.compare("tcp") ? endp(t_endpoint()) : endp()); } 
-    bool operator==(const peer& rhs) const { return !transport.compare(rhs.transport) && !addr.compare(rhs.addr) && port == rhs.port; }
-    std::string operator()() { return fmt::format("{}:{}:{}:{}", transport, addr, port, util::b58encode_h(id)); }
+    bool operator==(const peer_record& r) {
+        return address == r.address && signature == r.signature;
+    }
 };
 
 namespace proto { // protocol
@@ -36,7 +27,8 @@ enum actions {
     store = 1,
     find_node = 2,
     find_value = 3,
-    pub_key = 4
+    identify = 4,
+    get_addresses = 5
 };
 
 enum type {
@@ -62,8 +54,8 @@ struct peer_object {
     MSGPACK_DEFINE_MAP(t, a, p, i);
     peer_object() { }
     peer_object(std::string t_, std::string a_, int p_, std::string i_) : t(t_), a(a_), p(p_), i(i_) { }
-    peer_object(peer p_) : t(p_.transport), a(p_.addr), p(p_.port), i(util::b58encode_h(p_.id)) { }
-    peer to_peer() const { return peer(t, a, p, util::b58decode_h(i)); }
+    peer_object(net_peer p_) : t(p_.addr.transport()), a(p_.addr.addr), p(p_.addr.port), i(dec(p_.id)) { }
+    net_peer to_peer() const { return net_peer{ enc(i), net_addr(t, a, p) }; }
 };
 
 struct stored_data {
@@ -114,17 +106,39 @@ struct find_value_resp_data {
     MSGPACK_DEFINE_MAP(v, b);
 };
 
-// pub_key
+// identify
 
-struct pub_key_query_data {
+struct identify_query_data {
     std::string s;
     MSGPACK_DEFINE_MAP(s);
 };
 
-struct pub_key_resp_data {
+struct identify_resp_data {
     std::string k;
     std::string s;
     MSGPACK_DEFINE_MAP(k, s);
+};
+
+// get_addresses
+
+struct address_object {
+    std::string t;
+    std::string a;
+    std::string p;
+    address_object() {  }
+    address_object(net_addr ad) : t(ad.transport()), a(ad.addr), p(std::to_string(ad.port)) { } 
+    MSGPACK_DEFINE_MAP(t, a, p);
+};
+
+struct get_addresses_query_data {
+    std::string i;
+    MSGPACK_DEFINE_MAP(i);
+};
+
+struct get_addresses_resp_data {
+    std::string i;
+    std::vector<address_object> p;
+    MSGPACK_DEFINE_MAP(i, p);
 };
 
 struct message {

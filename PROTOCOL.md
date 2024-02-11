@@ -24,6 +24,7 @@ as defined in `include/dht/util.hpp` and `include/dht/proto.h`:
 - size of public/private keys in bytes (`key_size`) (default: 2048)
 - quorum for alternative lookups (`quorum`) (default: 3)
 - length of secret tokens (`token_length`) (default: 32)
+- maximum number of addresses allowed for a single ID (`table_entry_addr_limit`) (default: 10)
 
 ## messages
 
@@ -35,6 +36,7 @@ one message per client should be handled at any time. a client should not have m
 - messages missing any of these elements will be discarded  
 - messages larger than the maximum allowed size will be discarded
 - sending a query before sending back a response will cause the query to be discarded
+  - ***EXCEPTION:*** for public key exchanges from messages like `identify` 
 
 
 ```
@@ -56,7 +58,13 @@ peer objects are formatted like so:
 { "t": <transport>, "a": <address>, "p": <port>, "i": <enc-string> }
 ```
 
-transport is a string, either "udp" or "tcp", denoting transport protocol to be used
+address objects are formatted like so:
+
+```
+{ "t": <transport>, "a": <address>, "p": <port> }
+```
+
+where transport is a string, either "udp" or "tcp", denoting transport protocol to be used
 
 #### schema version
 
@@ -77,7 +85,8 @@ these are the actions:
 - store (`0x01`)
 - find_node (`0x02`)
 - find_value (`0x03`)
-- pub_key (`0x04`)
+- identify (`0x04`)
+- get_addresses (`0x05`)
 
 #### store types
 
@@ -89,7 +98,6 @@ can be handled differently:
 - provider record (`0x01`)
   - this is like a pointer to data, pointing to a peer that will provide this data.
     the data itself is simply a serialized peer object.
-        
 
 #### enc-string
 
@@ -418,12 +426,14 @@ as seen above in the `find_node` response.
         }
 ```
 
-### pub_key (`0x04`)
+### identify (`0x04`)
 
-this message is very simple. peer queries for public key in BER(?) key format (used in crypto++).  
-this message does not update the routing table.  
+this message is very simple. peer queries for public key in BER(?) key format (used in crypto++).  this function will also validate a peer's IP address.
 
-this message should be sent to peers before querying for closest nodes or key-value pairs to validate  
+if a key does not exist in the keystore for the node ID, then an identify query should be sent to the sending node as to acquire their public key. if there were complications in the process or the key was invalid, the node's request should be ignored entirely.  
+
+this message does not update the routing table.
+
 message and key-value signatures.
 
 #### action-specific data
@@ -448,7 +458,7 @@ recipient uses the following format:
 where:
 - secret token is a string of `token_length` random characters
 - public key is binary data 
-- signature is the signature for the secret token
+- signature is the signature for the following string format: `secret token:IP address:port`
 
 #### sequence
 
@@ -475,6 +485,35 @@ where:
                 "k": ff ff ff ff ... 3e 56 7a 10
         }
 ```
+
+### get_addresses (`0x05`)
+
+this message attempts to obtain valid peer records for a given peer ID from a node. responses must be peer records with valid signatures.  
+this message does not update the routing table.  
+on the client side, all obtained records should be externally validated (by identifying them) 
+
+#### action-specific data
+
+for sender,
+
+```
+"d": {
+        "i": <peer ID>
+}
+```
+
+for recipient,
+
+```
+"d": {
+        "i": <peer ID>,
+        "p": [<peer records>]
+}
+```
+
+where:
+- peer ID is an encoded string 
+- `p` is an array of peer records which were already defined 
 
 ## operations
 

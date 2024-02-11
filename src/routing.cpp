@@ -6,20 +6,20 @@
 /// @private
 /// @brief internal macro that traverses a tree based on the peer's id and also
 /// tries to find peer within current bucket after traversal
-#define TRAVERSE \
+#define TRAVERSE(I) \
     tree* ptr = NULL; \
     bucket::iterator it; \
     int cutoff = 0; \
     { \
         R_LOCK(mutex); \
         ptr = root; \
-        traverse(false, req.id, &ptr, cutoff); \
+        traverse(false, I, &ptr, cutoff); \
         assert(ptr != nullptr); \
         it = std::find_if(ptr->data.begin(), ptr->data.end(), \
-            [&](const peer& p) { return p.id == req.id; }); \
+            [&](const routing_table_entry& e) { return e.id == I; }); \
     }
 
-namespace tulip {
+namespace lotus {
 namespace dht {
 
 /// @brief initialize a tree
@@ -94,124 +94,49 @@ void routing_table::split(tree* t, int cutoff) {
 }
 
 /// @brief update peer in routing table whether or not it exists within table
-void routing_table::update(peer req) {
-    TRAVERSE;
-
-    // mismatched node - diff ip same id
-    if(it != ptr->data.end() && !(req == *it))
-        return;
+void routing_table::update(net_peer req) {
+    TRAVERSE(req.id);
 
     W_LOCK(mutex);
 
     hash_t mask(~hash_t(0) << (proto::bit_hash_width - cutoff));
-    
-    if(ptr->data.size() < ptr->data.max_size) {
-        spdlog::debug("bucket isn't full, update node {}", util::htos(req.id));
-        // bucket is not full, update node
-        ptr->data.update(req, true);
+
+    if(it == ptr->data.end() && ptr->data.size() < ptr->data.max_size) {
+        // bucket is not full and peer doesnt exist yet, add to bucket
+        ptr->data.add_new(req);
     } else {
-        if((req.id & mask) == (id & mask)) {
-            if(it == ptr->data.end()) {
-                spdlog::debug("bucket is within prefix, split");
-                // bucket is full and within our own prefix, split
-                /// @todo relaxed splitting, see https://stackoverflow.com/questions/32129978/highly-unbalanced-kademlia-routing-table/32187456#32187456
-                split(ptr, cutoff);
-            } else {
-                spdlog::debug("bucket is nearby and full");
-                // bucket is full but nearby, update node
-                ptr->data.update(req, true);
-            }
-        } else {
-            spdlog::debug("bucket is far and full");
-            if(it != ptr->data.end()) {
-                // node is known to us already, ping normally
-                ptr->data.update(req, false);
-                spdlog::debug("node {} exists in table, updating normally", util::htos(req.id));
-            } else {
-                LOCK(ptr->cache_mutex);
-                
-                // node is unknown
-                auto cit = std::find_if(ptr->cache.begin(), ptr->cache.end(),
-                    [&](peer p) { return p.id == req.id; });
-                
-                if(cit == ptr->cache.end()) {
-                    // is the cache full? kick out oldest node and add this one
-                    if(ptr->cache.size() > proto::repl_cache_size) {
-                        spdlog::debug("replacement cache is full, removing oldest candidate");
-                        ptr->cache.pop_front();
-                    }
-                    
-                    // node is unknown and doesn't exist in cache, add
-                    ptr->cache.push_back(req);
-                    spdlog::debug("node {} is unknown, adding to replacement cache", util::htos(req.id));
+        if(it != ptr->data.end()) {
+            if((req.id & mask) == (id & mask)) {
+                if(it == ptr->data.end()) {
+                    spdlog::debug("routing: bucket is within prefix, split");
+                    // bucket is full and within our own prefix, split
+                    /// @todo relaxed splitting, see https://stackoverflow.com/questions/32129978/highly-unbalanced-kademlia-routing-table/32187456#32187456
+                    split(ptr, cutoff);
                 } else {
-                    // node is unknown and exists in cache, move to back
-                    ptr->cache.splice(ptr->cache.end(), ptr->cache, cit);
-                    spdlog::debug("node {} is unknown, moving to end of replacement cache", util::htos(req.id));
+                    // bucket is full but nearby, update node
+                    ptr->data.update_near_entry(req);
+                }
+            } else {
+                if(it != ptr->data.end()) {
+                    // node is known to us already but far so ping to check liveness
+                    ptr->data.update_far_entry(req);
+                } else {
+                    // add/update entry in replacement cache
+                    ptr->data.update_cache(req);
                 }
             }
         }
     }
 }
 
-/// @brief evict peer from routing table, repeated calls will do nothing
-void routing_table::evict(peer req) {
-    TRAVERSE;
-
-    // does peer exist in table?
-    if(it != ptr->data.end()) {
-        // erase from bucket
-        ptr->data.erase(it);
-
-        // if cache has peer waiting, add most recently noticed node to bucket
-        if(ptr->cache.size() > 0) {
-            auto cit = ptr->cache.end();
-            cit--;
-            spdlog::debug("there is peer ({}) in the cache waiting, add it to the bucket", util::htos(cit->id));
-            ptr->data.push_back(*cit);
-            ptr->cache.erase(cit);
-        }
-    }
+void routing_table::stale(net_peer req) {
+    TRAVERSE(req.id);
+    ptr->data.stale(req);
 }
 
-/// @brief update peer that was in node's pending list
-/// @note this is used for pings to update bucket peers
-void routing_table::update_pending(peer req) {
-    TRAVERSE;
-
-    W_LOCK(mutex);
-    
-    // does peer exist in table?
-    if(it != ptr->data.end()) {
-        // if peer isn't too stale, decrement staleness and move to end of bucket
-        if(req.staleness++ < proto::missed_pings_allowed) {
-            req.staleness--;
-            ptr->data.splice(ptr->data.end(), ptr->data, it);
-            spdlog::debug("pending node {} updated", util::htos(req.id));
-        } else {
-            // otherwise, erase peer from bucket
-            ptr->data.erase(it);
-            spdlog::debug("erasing pending node {}", util::htos(req.id));
-        }
-    }
-}
-
-/// @brief find bucket based on peer id
-bucket routing_table::find_bucket(peer req) {
-    TRAVERSE;
-
+bucket& routing_table::find_bucket(hash_t req) {
+    TRAVERSE(req);
     return ptr->data;
-}
-
-/// @brief increment staleness by one
-int routing_table::stale(peer req) {
-    TRAVERSE;
-
-    W_LOCK(mutex);
-
-    if(it != ptr->data.end())
-        return it->staleness++;
-    return -1;
 }
 
 void routing_table::_dfs(std::function<void(tree*)> fn, tree* ptr) {
@@ -234,12 +159,12 @@ void routing_table::dfs(std::function<void(tree*)> fn) {
     _dfs(fn, ptr);
 }
 
-std::deque<peer> routing_table::find_alpha(peer req) {
-    TRAVERSE;
-
+std::deque<routing_table_entry> routing_table::find_alpha(hash_t req) {
     R_LOCK(mutex);
 
-    std::deque<peer> res;
+    TRAVERSE(req);
+
+    std::deque<routing_table_entry> res;
 
     int n = 0;
     for(auto e = ptr->data.begin(); e != ptr->data.end() && n++ < proto::alpha; ++e)
@@ -253,6 +178,14 @@ std::deque<peer> routing_table::find_alpha(peer req) {
 
     // nothing we can do afterwards
     return res;
+}
+
+boost::optional<routing_table_entry> routing_table::find(hash_t id) {
+    R_LOCK(mutex);
+
+    TRAVERSE(id);
+    
+    return (it != ptr->data.end()) ? *it : boost::optional<routing_table_entry>(boost::none);
 }
 
 }

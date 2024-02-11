@@ -1,7 +1,7 @@
 #include "crypto.h"
 #include "dht.h"
 
-namespace tulip {
+namespace lotus {
 namespace pki {
 
 crypto::crypto() { }
@@ -28,8 +28,8 @@ void crypto::import_keypair(keypair kp) {
 }
 
 void crypto::import_file(std::string pub_filename, std::string priv_filename) {
-    key_pair.pub_key.Load(FileSource(pub_filename.c_str(), true, NULL, true).Ref());
-    key_pair.priv_key.Load(FileSource(priv_filename.c_str(), true, NULL, true).Ref());
+    key_pair.pub_key.BERDecode(FileSource(pub_filename.c_str(), true).Ref());
+    key_pair.priv_key.BERDecode(FileSource(priv_filename.c_str(), true).Ref());
 }
 
 void crypto::export_keypair(keypair& kp) {
@@ -38,8 +38,8 @@ void crypto::export_keypair(keypair& kp) {
 }
 
 void crypto::export_file(std::string pub_filename, std::string priv_filename) {
-    key_pair.pub_key.Save(FileSink(pub_filename.c_str(), true).Ref());
-    key_pair.priv_key.Save(FileSink(priv_filename.c_str(), true).Ref());
+    key_pair.pub_key.BEREncode(FileSink(pub_filename.c_str(), true).Ref());
+    key_pair.priv_key.DEREncode(FileSink(priv_filename.c_str(), true).Ref());
 }
 
 std::string crypto::sign(std::string message) {

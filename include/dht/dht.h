@@ -8,20 +8,20 @@
 #include "network.h"
 #include "crypto.h"
 
-namespace tulip {
+namespace lotus {
 namespace dht {
 
 struct kv {
     hash_t key;
     int type;
     std::string value;
-    peer origin;
+    net_peer origin;
     u64 timestamp;
     std::string signature;
 
-    kv() { }
+    kv() : origin(empty_net_peer) { }
 
-    kv(hash_t k, int ty, std::string v, peer o, u64 ts, std::string s) : 
+    kv(hash_t k, int ty, std::string v, net_peer o, u64 ts, std::string s) : 
         key(k), type(ty), value(v), origin(o), timestamp(ts), signature(s) { } 
 
     kv(hash_t k, const proto::stored_data& s) : 
@@ -29,10 +29,10 @@ struct kv {
 
     std::string sig_blob() const {
         proto::sig_blob sb;
-        sb.k = util::b58encode_h(key); // k: key
+        sb.k = dec(key); // k: key
         sb.d = type; // d: store type
         sb.v = value; // v: value
-        sb.i = util::b58encode_h(origin.id); // i: origin ID
+        sb.i = dec(origin.id); // i: origin ID
         sb.t = timestamp; // t: timestamp
 
         std::stringstream ss;
@@ -44,60 +44,48 @@ struct kv {
 
 class node {
 public:
-    using basic_callback = std::function<void(peer)>;
+    using basic_callback = std::function<void(net_contact)>;
     using value_callback = std::function<void(std::vector<kv>)>;
-    using prov_callback = std::function<void(std::vector<peer>)>;
+    using contacts_callback = std::function<void(std::vector<net_contact>)>;
 
-    basic_callback basic_nothing = [](peer) { };
+    basic_callback basic_nothing = [](net_contact) { };
 
-    node(u16);
+    node(bool, u16);
+    ~node();
 
     hash_t get_id() const;
     
     void run();
     void run(std::string, std::string);
+    void generate_keypair();
     void export_keypair(std::string, std::string);
-
-    ~node();
 
     void put(std::string, std::string);
     void get(std::string, value_callback);
-    void provide(std::string, peer);
-    void get_providers(std::string, prov_callback);
-    
-    void join(peer, basic_callback, basic_callback);
+    void provide(std::string, net_peer);
+    void get_providers(std::string, contacts_callback);
+    void join(net_addr, basic_callback, basic_callback);
+    void resolve(hash_t, basic_callback, basic_callback);
     
 private:
-    using fv_value = boost::variant<boost::blank, kv, bucket>;
-    using bucket_callback = std::function<void(peer, bucket)>;
-    using find_value_callback = std::function<void(peer, fv_value)>;
-    using pub_key_callback = std::function<void(peer, std::string)>;
-    using fut_t = std::tuple<peer, fv_value>;
+    using fv_value = boost::variant<boost::blank, kv, std::list<net_contact>>;
+    using bucket_callback = std::function<void(net_contact, std::list<net_contact>)>;
+    using find_value_callback = std::function<void(net_contact, fv_value)>;
+    using identify_callback = std::function<void(net_peer, std::string)>;
+    using addresses_callback = std::function<void(net_contact, std::list<net_peer>)>;
+    using fut_t = std::tuple<net_contact, fv_value>;
 
     struct djc {
         std::mutex mutex;
-        std::list<peer> shortlist;
+        std::list<net_contact> shortlist;
     };
 
-    using lkp_t = std::function<fv_value(std::deque<peer>, std::shared_ptr<djc>, int)>;
+    using lkp_t = std::function<fv_value(std::deque<net_contact>, std::shared_ptr<djc>, int)>;
 
     void _run();
 
-    void ping(peer, basic_callback, basic_callback);
-    void iter_store(int, std::string, std::string);
-    bucket iter_find_node(hash_t);
-    void pub_key(peer, pub_key_callback, basic_callback);
-
-    std::future<fut_t> _lookup(bool, peer, hash_t);
-    std::future<std::string> _pub_key(peer);
-
-    bool acquire_pub_key(peer);
-    
-    bucket lookup_nodes(std::deque<peer>, hash_t);
-    fv_value lookup_value(std::deque<peer>, boost::optional<std::shared_ptr<djc>>, hash_t, int);
-
     std::list<node::fv_value> disjoint_lookup_value(hash_t target_id, int Q) {
-        std::deque<peer> initial = table->find_alpha(peer(target_id));
+        std::deque<routing_table_entry> initial = table->find_alpha(target_id);
         std::shared_ptr<djc> claimed = std::make_shared<djc>();
         std::list<fv_value> paths;
         std::list<std::future<fv_value>> tasks;
@@ -105,7 +93,7 @@ private:
         int i = 0;
 
         auto task = [this, target_id] (
-            std::deque<peer> shortlist, std::shared_ptr<djc> claimed, int Q) -> fv_value {
+            std::deque<net_contact> shortlist, std::shared_ptr<djc> claimed, int Q) -> fv_value {
                 return lookup_value(shortlist, claimed, target_id, Q);
             };
 
@@ -117,7 +105,7 @@ private:
 
         while(i++ < proto::disjoint_paths) {
             int n = 0;
-            std::deque<peer> shortlist;
+            std::deque<net_contact> shortlist;
 
             while(n++ < num_to_slice) {
                 shortlist.push_back(initial.front());
@@ -136,17 +124,31 @@ private:
     void refresh(tree*);
     void republish(kv);
 
-    // async interfaces
-    void store(bool, peer, kv, basic_callback, basic_callback);
-    void find_node(peer, hash_t, bucket_callback, basic_callback);
-    void find_value(peer, hash_t, find_value_callback, basic_callback);
-    void find_value(peer, std::string, find_value_callback, basic_callback);
+    std::future<net_peer> _verify_node(net_peer);
+    std::future<fut_t> _lookup(bool, net_contact, hash_t);
+    net_contact resolve_peer_in_table(net_peer);
+    std::list<net_contact> lookup_nodes(std::deque<net_contact>, hash_t);
+    fv_value lookup_value(std::deque<net_contact>, boost::optional<std::shared_ptr<djc>>, hash_t, int);
 
-    void handle_ping(peer, proto::message);
-    void handle_store(peer, proto::message);
-    void handle_find_node(peer, proto::message);
-    void handle_find_value(peer, proto::message);
-    void handle_pub_key(peer, proto::message);
+    // async interfaces
+    void ping(net_contact, basic_callback, basic_callback);
+    void iter_store(int, std::string, std::string);
+    std::list<net_contact> iter_find_node(hash_t);
+    void identify(net_contact, identify_callback, basic_callback);
+    void get_addresses(net_contact, hash_t, addresses_callback, basic_callback);
+    void store(bool, net_contact, kv, basic_callback, basic_callback);
+    void find_node(net_contact, hash_t, bucket_callback, basic_callback);
+    void find_value(net_contact, hash_t, find_value_callback, basic_callback);
+
+    // message handlers
+    void handler(net_peer, proto::message);
+    void _handler(net_peer, proto::message);
+    void handle_ping(net_peer, proto::message);
+    void handle_store(net_peer, proto::message);
+    void handle_find_node(net_peer, proto::message);
+    void handle_find_value(net_peer, proto::message);
+    void handle_identify(net_peer, proto::message);
+    void handle_get_addresses(net_peer, proto::message);
 
     hash_t id;
 

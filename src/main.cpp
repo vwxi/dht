@@ -3,69 +3,51 @@
 int main(int argc, char** argv) {
     spdlog::set_level(spdlog::level::debug);
     spdlog::set_pattern("[%P] [%H:%M:%S] [%^%l%$] %v");
-    using namespace tulip::dht;
+    using namespace lotus::dht;
 
     // ctor starts networking
     switch(std::atoi(argv[1])) {
     case 1: // bare node
         {
-            node n(16161);
+            node n(true, 16161);
             n.run();
         }
         break;
-    case 2: // join and do nothing
+    case 2: // join
         {
-            node n(std::atoi(argv[2]));
-            n.run();
-            n.join(peer("udp", argv[3], std::atoi(argv[4])), n.basic_nothing, n.basic_nothing);
+            node n(true, std::atoi(argv[2]));
+            n.run("pub2", "priv2");
+            n.join(net_addr("udp", argv[3], std::atoi(argv[4])), 
+                [&](net_contact peer) {
+                    spdlog::info("join ok");
+                    spdlog::info("join addresses:");
+                    for(auto a : peer.addresses)
+                        spdlog::info("\t{}", a.to_string());
+                }, 
+                [&](net_contact peer) {
+                    spdlog::info("join bad");
+                });
         }
         break;
-    case 3: // join and store a value
+    case 3: // join & resolve own ip
         {
-            node n(std::atoi(argv[2]));
-            n.run();
-            n.join(peer("udp", argv[3], std::atoi(argv[4])), 
-                [&](peer p_) {
-                    n.put("hello", "hihi");
-                }, n.basic_nothing);
-        }
-        break;
-    case 4: // join and fetch value(s)
-        {
-            node n(std::atoi(argv[2]));
-            n.run();
-            n.join(peer("udp", argv[3], std::atoi(argv[4])), 
-                [&](peer p_) {
-                    n.get("hello", [&](std::vector<kv> values) {
-                        for(auto i : values)
-                            spdlog::info("{} -> data: \"{}\", origin: {}, timestamp: {}", 
-                                i.type == proto::store_type::provider_record ? "provider" : "data",
-                                i.value, i.origin(), i.timestamp);
-                    });
-                }, n.basic_nothing);
-        }
-        break;
-    case 5: // join and start providing
-        {
-            node n(std::atoi(argv[2]));
-            n.run();
-            n.join(peer("udp", argv[3], std::atoi(argv[4])), 
-                [&](peer p_) {
-                    n.provide("hello", peer("tcp", "127.0.0.1", std::atoi(argv[2]), n.get_id()));
-                }, n.basic_nothing);
-        }
-        break;
-    case 6: // join and fetch provider(s)
-        {
-            node n(std::atoi(argv[2]));
-            n.run();
-            n.join(peer("udp", argv[3], std::atoi(argv[4])), 
-                [&](peer p_) {
-                    n.get_providers("hello", [&](std::vector<peer> providers) {
-                        for(auto i : providers)
-                            spdlog::info("\tprovider -> {}", i());
-                    });
-                }, n.basic_nothing);
+            node n(true, std::atoi(argv[2]));
+            n.run("pub", "priv");
+            n.join(net_addr("udp", argv[3], std::atoi(argv[4])), 
+                [&](net_contact peer) {
+                    n.resolve(enc("3NYJ54uJys9xPA6DntLD3uaSQVKQW92gE8WNci7vLsKg"),
+                        [&](net_contact p) {
+                            spdlog::critical("resolved addresses...");
+                            for(auto a : p.addresses)
+                                spdlog::critical("\t{}", a.to_string());
+                        },
+                        [](net_contact) {
+                            spdlog::critical("couldn't resolve addresses");
+                        });
+                }, 
+                [&](net_contact peer) {
+                    spdlog::info("join bad");
+                });
         }
         break;
     }
