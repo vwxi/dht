@@ -6,18 +6,6 @@
 namespace lotus {
 namespace dht {
 
-struct peer_record {
-    net_addr address;
-    std::string signature;
-    
-    peer_record(std::string t, std::string a, u16 p, std::string s) :
-        address(t, a, p), signature(s) { }
-
-    bool operator==(const peer_record& r) {
-        return address == r.address && signature == r.signature;
-    }
-};
-
 namespace proto { // protocol
 
 const int schema_version = 0;
@@ -54,8 +42,15 @@ struct peer_object {
     MSGPACK_DEFINE_MAP(t, a, p, i);
     peer_object() { }
     peer_object(std::string t_, std::string a_, int p_, std::string i_) : t(t_), a(a_), p(p_), i(i_) { }
-    peer_object(net_peer p_) : t(p_.addr.transport()), a(p_.addr.addr), p(p_.addr.port), i(dec(p_.id)) { }
-    net_peer to_peer() const { return net_peer{ enc(i), net_addr(t, a, p) }; }
+    peer_object(net_peer p_) : t(p_.addr.transport()), a(p_.addr.addr), p(p_.addr.port), i(util::enc58(p_.id)) { }
+    net_peer to_peer() const { return net_peer{ util::dec58(i), net_addr(t, a, p) }; }
+};
+
+struct provider_record {
+    std::string i;
+    u64 e;
+    std::string s;
+    MSGPACK_DEFINE_MAP(i, e, s);
 };
 
 struct stored_data {
@@ -150,8 +145,6 @@ struct message {
     msgpack::object d;
     MSGPACK_DEFINE_MAP(s, m, a, i, q, d);
 };
-
-// sig blob
 
 struct sig_blob {
     std::string k;

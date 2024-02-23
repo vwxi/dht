@@ -14,6 +14,14 @@ std::string crypto::pub_key() {
     return pk;
 }
 
+std::string crypto::pub_key(RSA::PublicKey key) {
+    std::string pk;
+
+    key.Save(StringSink(pk).Ref());
+
+    return pk;
+}
+
 void crypto::generate_keypair() {
     InvertibleRSAFunction params;
     params.GenerateRandomWithKeySize(rng, dht::proto::key_size);
@@ -74,13 +82,14 @@ bool crypto::verify(std::string message, std::string signature) {
 bool crypto::verify(dht::hash_t id, std::string message, std::string signature) {
     auto k = ks_get(id);
 
-    if(!k.has_value())
+    if(!k.has_value()) {
         return false;
+    }
 
     bool v = verify(k.value(), message, signature);
 
     // remove from local keystore
-    if(!v)
+    if(!v) 
         ks_del(id);
 
     return v;

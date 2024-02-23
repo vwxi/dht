@@ -9,10 +9,10 @@ namespace dht {
 
 /// message queue
 
-void msg_queue::await(net_peer p, u64 msg_id, q_callback ok, f_callback bad) {
+void msg_queue::await(net_peer p, int action, u64 msg_id, q_callback ok, f_callback bad) {
     LOCK(mutex);
 
-    items.emplace_back(p, msg_id, false);
+    items.emplace_back(p, msg_id, action, false);
     auto pit = items.end();
 
     std::thread(&msg_queue::wait, this, --pit, ok, bad).detach();
@@ -58,13 +58,14 @@ void msg_queue::wait(std::list<item>::iterator it, q_callback ok, f_callback bad
     }
 }
 
-void msg_queue::satisfy(net_peer p, u64 msg_id, std::string data) {
+void msg_queue::satisfy(net_peer p, int action, u64 msg_id, std::string data) {
     LOCK(mutex);
 
     auto it = std::find_if(items.begin(), items.end(),
         [&](const item& i) { 
             return (i.req.id == p.id || 
                 i.req.addr == p.addr) && 
+                i.action == action &&
                 i.msg_id == msg_id && 
                 !i.satisfied; 
         });
@@ -77,12 +78,13 @@ void msg_queue::satisfy(net_peer p, u64 msg_id, std::string data) {
     it->promise.set_value(data);
 }
 
-bool msg_queue::pending(net_peer p, u64 msg_id) {
+bool msg_queue::pending(net_peer p, int action, u64 msg_id) {
     LOCK(mutex);
 
     auto it = std::find_if(items.begin(), items.end(),
         [&](const item& i) { 
             return i.req.addr == p.addr && 
+                i.action == action &&
                 i.msg_id == msg_id && 
                 !i.satisfied;  
         });
@@ -130,7 +132,7 @@ void network::recv() {
 
                 if(!ec) {
                     std::string buf;
-                    auto len = readable.get();
+                    std::size_t len = readable.get();
 
                     // messages larger than the maximum allowed size will be discarded
                     if(len > proto::max_data_size || len == 0)
@@ -152,23 +154,19 @@ void network::recv() {
 
 void network::handle(std::string buf, udp::endpoint ep) {
     try {
-        msgpack::object_handle result;
+        proto::message msg = util::deserialize<proto::message>(buf);
 
-        msgpack::unpack(result, buf.c_str(), buf.size());
-        msgpack::object obj(result.get());
-
-        proto::message msg = obj.as<proto::message>();
-
-        net_peer p{ enc(msg.i), net_addr("udp", ep.address().to_string(), ep.port()) };
+        net_peer p{ util::dec58(msg.i), net_addr("udp", ep.address().to_string(), ep.port()) };
 
         // if there's already a response pending, drop this one
         // except if it's an identify request
         if(msg.m == proto::type::query && 
-            queue.pending(p, msg.q) && 
-            msg.a != proto::actions::identify) {
+            queue.pending(p, msg.a, msg.q) && 
+            msg.a != proto::actions::identify &&
+            msg.a != proto::actions::get_addresses) {
             return;
         }
-
+           
         message_handler(std::move(p), std::move(msg));
     } catch (std::exception& e) { spdlog::debug("exception caught: {}", e.what()); }
 }

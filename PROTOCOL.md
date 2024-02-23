@@ -36,7 +36,7 @@ one message per client should be handled at any time. a client should not have m
 - messages missing any of these elements will be discarded  
 - messages larger than the maximum allowed size will be discarded
 - sending a query before sending back a response will cause the query to be discarded
-  - ***EXCEPTION:*** for public key exchanges from messages like `identify` 
+  - ***EXCEPTION:*** for messages like `identify` and `get_addresses`
 
 
 ```
@@ -103,8 +103,12 @@ can be handled differently:
     ```
   - the provider ID can be resolved using the `get_addresses` message
   - after `republish_time` seconds, the provider record is considered expired. 
-  - signature signs the following data format: `<provider id>:<expiry time>`
-  - recipients should reject provider records past expiry date, with an invalid signature or from an ID that cannot be resolved.
+  - signature signs the following data format: `<provider id enc-string>:<expiry time as string>`
+  - recipients should reject provider records if:
+    - past their expiry date
+    - with an invalid signature
+    - where the provider ID and sender ID don't match
+    - cannot get addresses from provider ID
 
 #### enc-string
 
@@ -174,7 +178,7 @@ there is no extra data to be sent from both parties
 
 ### store (`0x01`)
 
-this message is meant for storing key-value pairs on a specific node's hash table
+this message is meant for storing key-value pairs on a specific node's hash table. if the item exists already in the recipient's local store, the new value will not be stored.
 
 #### action-specific data
 
@@ -184,7 +188,7 @@ for sender,
         "k": <key>,
         "d": <store type>
         "v": <binary data>
-        "o": <origin>
+        "o": <origin ID>
         "t": <timestamp>,
         "s": <signature>
 }
@@ -202,11 +206,11 @@ where:
 - the key (enc-string)
 - store type (see above)
 - binary data (string)
-- origin (peer object or nil)
+- origin (ID or nil)
 - timestamp (64-bit integer timestamp)
 - signature (binary data)
 - checksum (32-bit integer)
-- status (integer, zero = ok, nonzero = error)
+- status (integer, zero = ok, nonzero = error/already stored)
 
 if the origin is nil, then the sender is the origin of the key-value pair
 
@@ -237,7 +241,7 @@ with the following syntax using the origin's private key:
                 "k": "5PYPwi",
                 "d": 0,
                 "v": a3 e5 1d 0f 9e ... 6e 77 3a 0e 9f,
-                "o": { "t": "udp", "a": "127.0.0.1", "p": 10001, "i": "1vxEC" }
+                "o": "1vxEC",
                 "t": 15019835313561,
                 "s": ff ff ff ff 00 ... 0e 1a f4 3f dd
         }
@@ -278,11 +282,7 @@ for recipient, "buckets" are serialized into arrays where each element describes
 
 ```
 "d": {
-        "b": [
-                {"t": <transport>, "a": <IP address>, "p": <UDP port>, "i": <ID> }, 
-                {"t": <transport>, "a": <IP address>, "p": <UDP port>, "i": <ID> },
-                {"t": <transport>, "a": <IP address>, "p": <UDP port>, "i": <ID> }
-        ],
+        "b": [<IDs>],
         "s": <signature>
 }
 ```
@@ -320,10 +320,7 @@ if there are no nearby nodes, the bucket may be empty
         "i": "bqgzy",
         "q": 103581305802345,
         "d": {
-                "b": [
-                        {"t": "udp", "a": "24.30.210.11", "p": 16616, "i": "12JZzN" }, 
-                        {"t": "udp", "a": "1.1.51.103", "p": 10510, "i": "5NbYrm" }
-                ],
+                "b": [ "12JZzN", "5NbYrm" ],
                 "s": ff ff ff ff 00 ... 0e 1a f4 3f dd
         }
 }
@@ -405,7 +402,7 @@ as seen above in the `find_node` response.
         "d": {
                 "v": {
                         "v": 1e e5 6a 2e 90 ... a0 e4 b7 61 d8,
-                        "o": {"t": "udp", "a": "127.0.0.1", "p": 16006, "i": "gaofe"},
+                        "o": "1vxEC",
                         "t": 196182340981,
                         "s": ff ff ff ff 00 ... 0e 1a f4 3f dd
                 },
@@ -424,10 +421,7 @@ as seen above in the `find_node` response.
         "d": {
                 "v": nil,
                 "b": {
-                        "b": [
-                                {"t": "udp", "a": "24.30.210.11", "p": 16616, "i": "12JZzN" }, 
-                                {"t": "udp", "a": "1.1.51.103", "p": 10510, "i": "5NbYrm" }       
-                        ],
+                        "b": [ "12JZzN", "5NbYrm" ],
                         "s": ff ff ff ff 00 ... 0e 1a f4 3f dd
                 },
         }
@@ -495,7 +489,7 @@ where:
 
 ### get_addresses (`0x05`)
 
-this message attempts to obtain valid peer records for a given peer ID from a node. responses must be peer records with valid signatures.  
+this message attempts to obtain valid peer records for a given peer ID from a node. responses must be peer records with valid signatures. if the peer ID is the recipient's ID, the recipient must respond with their own peer record.  
 this message does not update the routing table.  
 on the client side, all obtained records should be externally validated (by identifying them) 
 

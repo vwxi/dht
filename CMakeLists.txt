@@ -49,7 +49,7 @@ endif()
 
 add_subdirectory(extern/spdlog)
 add_subdirectory(extern/msgpack-c)
-add_subdirectory(extern/cryptopp)
+add_subdirectory(extern/cryptopp-cmake)
 add_subdirectory(extern/miniupnp/miniupnpc)
 
 add_executable(

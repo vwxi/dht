@@ -20,17 +20,17 @@ void bucket::responded(net_peer req) {
         // new address. ignore if limit is reached
         if(it->addresses.size() < proto::table_entry_addr_limit) {
             it->addresses.emplace_back(req.addr, 0);
-            spdlog::debug("routing: new address for existing node {} found: {}, adding.", util::htos(it->id), req.addr.to_string());
+            spdlog::debug("routing: new address for existing node {} found: {}, adding.", util::enc58(it->id), req.addr.to_string());
         }
     } else {
         if(a->second < proto::missed_pings_allowed) {
             if(a->second-- == 0) a->second = 0;
             
             splice(end(), *this, it);
-            spdlog::debug("routing: pending node {} updated", util::htos(it->id));
+            spdlog::debug("routing: pending node {} updated", util::enc58(it->id));
         } else {
             erase(it);
-            spdlog::debug("routing: erasing pending node {}", util::htos(it->id));
+            spdlog::debug("routing: erasing pending node {}", util::enc58(it->id));
         }
     }
 
@@ -53,7 +53,7 @@ void bucket::stale(net_peer req) {
         if(itt->second++ > proto::missed_pings_allowed) {
             spdlog::debug("routing: did not respond, evicting address {} from {}", 
                 req.addr.to_string(), 
-                util::htos(req.id));
+                util::enc58(req.id));
 
             // if this is the last address available, see if can remove from bucket
             if(it->addresses.size() == 1) {
@@ -77,7 +77,7 @@ void bucket::stale(net_peer req) {
 void bucket::add_new(net_peer req) {
     if(size() < max_size) {
         emplace_back(req.id, req.addr);
-        spdlog::debug("routing: new node (id: {}, addr: {}), size: {}", util::htos(req.id), req.addr.to_string(), size());
+        spdlog::debug("routing: new node (id: {}, addr: {}), size: {}", util::enc58(req.id), req.addr.to_string(), size());
     
         last_seen = TIME_NOW();
     }
@@ -107,11 +107,11 @@ void bucket::update_near_entry(net_peer req) {
             // if limit reached, ignore
             if(rit->addresses.size() < proto::table_entry_addr_limit) {
                 rit->addresses.emplace_back(req.addr, 0);
-                spdlog::debug("routing: new address for existing node {} found: {}, adding.", util::htos(rit->id), req.addr.to_string());
+                spdlog::debug("routing: new address for existing node {} found: {}, adding.", util::enc58(rit->id), req.addr.to_string());
             }
         }
 
-        spdlog::debug("routing: exists already, moved node {} to tail. size: {}", util::htos(rit->id), size());
+        spdlog::debug("routing: exists already, moved node {} to tail. size: {}", util::enc58(rit->id), size());
     
         last_seen = TIME_NOW();
     }
@@ -124,7 +124,7 @@ void bucket::update_far_entry(net_peer req) {
         return;
 
     net_contact contact(front());
-    spdlog::debug("routing: checking if node {} is alive", util::htos(contact.id));
+    spdlog::debug("routing: checking if node {} is alive", util::enc58(contact.id));
 
     // try what addresses are available if the first doesnt work out
     table->net.send(true,
@@ -156,11 +156,11 @@ void bucket::update_cache(net_peer req) {
         
         // node is unknown and doesn't exist in cache, add
         cache.push_back(req);
-        spdlog::debug("routing: node {} is unknown, adding to replacement cache", util::htos(req.id));
+        spdlog::debug("routing: node {} is unknown, adding to replacement cache", util::enc58(req.id));
     } else {
         // node exists in cache, move to back
         cache.splice(cache.end(), cache, cit);
-        spdlog::debug("routing: node {} is unknown, moving to end of replacement cache", util::htos(req.id));
+        spdlog::debug("routing: node {} is unknown, moving to end of replacement cache", util::enc58(req.id));
     }
 }
 

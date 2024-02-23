@@ -17,17 +17,18 @@ public:
     q_callback q_nothing = [](net_peer, std::string) { };
     f_callback f_nothing = [](net_peer) { };
 
-    void await(net_peer, u64, q_callback, f_callback);
-    void satisfy(net_peer, u64, std::string);
-    bool pending(net_peer, u64);
+    void await(net_peer, int, u64, q_callback, f_callback);
+    void satisfy(net_peer, int, u64, std::string);
+    bool pending(net_peer, int, u64);
 
 private:
     struct item {
         net_peer req;
         u64 msg_id;
+        int action;
         std::promise<std::string> promise;
         bool satisfied;
-        item(net_peer r, u64 m, bool s) : req(r), msg_id(m), satisfied(s) { }
+        item(net_peer r, u64 m, int a, bool s) : req(r), msg_id(m), action(a), satisfied(s) { }
     };
 
     void wait(std::list<item>::iterator, q_callback, f_callback);
@@ -52,28 +53,28 @@ public:
     // send to individual address
     template <typename T>
     void send(bool f, net_addr addr, int m, int a, hash_t i, u64 q, T d, msg_queue::q_callback ok, msg_queue::f_callback bad) {
-        msgpack::sbuffer sb = prepare_message(m, a, i, q, d);
+        std::string s = prepare_message(m, a, i, q, d);
 
         if(f) {
-            queue.await(net_peer{ 0, addr }, q, ok, bad);
+            queue.await(net_peer{ 0, addr }, a, q, ok, bad);
         }
 
         socket.async_send_to(
-            boost::asio::buffer(sb.data(), sb.size()), 
+            boost::asio::buffer(s.data(), s.size()), 
             addr.udp_endpoint(), b_nothing);
     }
 
     // send with alternate addresses
     template <typename T>
     void send(bool f, std::vector<net_addr> addresses, int m, int a, hash_t i, u64 q, T d, msg_queue::q_callback ok, msg_queue::f_callback bad) {
-        msgpack::sbuffer sb = prepare_message(m, a, i, q, d);
+        std::string s = prepare_message(m, a, i, q, d);
 
         if(addresses.empty())
             return;
 
         // await a response, if none, try next address
         if(f) {
-            queue.await(net_peer{ 0, *addresses.begin() }, q, ok, 
+            queue.await(net_peer{ 0, *addresses.begin() }, a, q, ok, 
                 [this, ad = addresses, f, m, a, i, q, d, ok, bad](net_peer p) mutable {
                     if(ad.empty())
                         bad(p);
@@ -92,7 +93,7 @@ public:
 
         // send
         socket.async_send_to(
-            boost::asio::buffer(sb.data(), sb.size()), 
+            boost::asio::buffer(s.data(), s.size()), 
             addresses.begin()->udp_endpoint(), b_nothing);
     }
 
@@ -111,20 +112,18 @@ public:
 
 private:
     template <typename T>
-    msgpack::sbuffer prepare_message(int m, int a, hash_t i, u64 q, T d) {
+    std::string prepare_message(int m, int a, hash_t i, u64 q, T d) {
         msgpack::zone z;
+
         proto::message msg;
         msg.s = proto::schema_version; // s: schema
         msg.m = m; // m: message type
         msg.a = a; // a: action
-        msg.i = dec(i); // i: serialized ID
+        msg.i = util::enc58(i); // i: serialized ID
         msg.q = q; // q: message ID
         msg.d = msgpack::object(d, z); // d: action-specific data
-        
-        msgpack::sbuffer sb;
-        msgpack::pack(sb, msg);
 
-        return sb;
+        return util::serialize(msg);
     }
 
     void handle(std::string, udp::endpoint);

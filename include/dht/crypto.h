@@ -24,6 +24,7 @@ public:
 
     // public access to pub key
     std::string pub_key();
+    std::string pub_key(RSA::PublicKey);
 
     // generate keypair
     void generate_keypair();

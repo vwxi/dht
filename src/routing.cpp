@@ -136,6 +136,7 @@ void routing_table::stale(net_peer req) {
 
 bucket& routing_table::find_bucket(hash_t req) {
     TRAVERSE(req);
+    
     return ptr->data;
 }
 

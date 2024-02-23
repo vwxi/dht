@@ -82,9 +82,9 @@ const int repl_cache_size = 3; // number of peers allowed in bucket replacement 
 const u64 max_data_size = 65535; // max data size in bytes
 const int alpha = 3; // alpha from kademlia paper
 const int refresh_time = 3600; // number of seconds until a bucket needs refreshing
-const int republish_time = 86400; // number of seconds until a key-value pair expires
+const int republish_time = 100; // number of seconds until a key-value pair expires
 const int refresh_interval = 600; // when to refresh buckets older than refresh_time, in seconds
-const int republish_interval = 86400; // when to republish data older than an republish_time, in seconds
+const int republish_interval = 10; // when to republish data older than an republish_time, in seconds
 const int disjoint_paths = 3; // number of disjoint paths to take for lookups
 const int key_size = 2048; // size of public/private keys in bytes
 const int quorum = 3; // quorum for alternative lookup procedure (lp_lookup)
@@ -128,7 +128,7 @@ struct net_addr {
     u16 port;
 
     net_addr() : transport_type(t_udp), addr(), port(0) {  }
-    net_addr(std::string t, std::string a, u16 p) : addr(a), port(p) {
+    net_addr(const std::string& t, const std::string& a, u16 p) : addr(a), port(p) {
         if(t == "udp") transport_type = t_udp;
         else if(t == "tcp") transport_type = t_tcp;
     }
@@ -165,7 +165,7 @@ struct routing_table_entry {
     hash_t id;
     std::vector<mi_addr> addresses;
 
-    routing_table_entry(hash_t i, net_addr a) :
+    routing_table_entry(hash_t i, const net_addr& a) :
         id(i), addresses{ { a, 0 } } { }
 };
 
@@ -175,7 +175,7 @@ struct net_peer {
     hash_t id;
     net_addr addr;
 
-    net_peer(hash_t id_, net_addr addr_) : id(id_), addr(addr_) { }
+    net_peer(hash_t id_, const net_addr& addr_) : id(id_), addr(addr_) { }
     bool operator==(const net_peer& rhs) { return id == rhs.id && addr == rhs.addr; }
     bool operator!=(const net_peer& rhs) { return !(*this == rhs); }
 } static empty_net_peer{ 0, net_addr("", "", 0) };
@@ -186,13 +186,13 @@ struct net_contact {
     std::vector<net_addr> addresses;
 
     net_contact() : id(0), addresses() { }
-    net_contact(hash_t id_, std::vector<net_addr> addrs) : id(id_), addresses(addrs) { }
-    net_contact(const net_peer& p) : id(p.id), addresses{ p.addr } { }
-    net_contact(const routing_table_entry& rte) : id(rte.id) {
-        for(auto a : rte.addresses)
-            addresses.push_back(a.first);
+    net_contact(hash_t id_, const std::vector<net_addr>& addrs) : id(id_), addresses(addrs) { }
+    explicit net_contact(const net_addr& a) : id(0), addresses{ a } { }
+    explicit net_contact(const net_peer& p) : id(p.id), addresses{ p.addr } { }
+    explicit net_contact(const routing_table_entry& rte) : id(rte.id) {
+        std::transform(rte.addresses.begin(), rte.addresses.end(), std::back_inserter(addresses),
+            [](const routing_table_entry::mi_addr& a) { return a.first; });
     }
-
     bool operator==(const net_contact& c) { return c.id == id; }
 };
 
@@ -201,25 +201,6 @@ namespace util { // utilities
 static u64 time_now() {
     return duration_cast<seconds>(system_clock::now().time_since_epoch()).count();
 }
-
-template<typename ... Args>
-static std::string string_format( const std::string& format, Args ... args )
-{
-    int size_s = std::snprintf( nullptr, 0, format.c_str(), args ... ) + 1;
-    if( size_s <= 0 ){ throw std::runtime_error( "Error during formatting." ); }
-    auto size = static_cast<size_t>( size_s );
-    std::unique_ptr<char[]> buf( new char[ size ] );
-    std::snprintf( buf.get(), size, format.c_str(), args ... );
-    return std::string( buf.get(), buf.get() + size - 1 );
-}
-
-// static std::string htos(hash_t h) {
-//     std::stringstream ss;
-//     ss << std::hex;
-//     ss << "0x";
-//     ss << h;
-//     return ss.str();
-// }
 
 static u64 msg_id() {
     u64 r = rand();
@@ -240,14 +221,14 @@ static std::string gen_token(token_reng_t& reng) {
 }
 
 // http://www.hackersdelight.org/hdcodetxt/crc.c.txt
-static unsigned int crc32b(unsigned char *message) {
+static unsigned int crc32b(const unsigned char *message) {
    int i, j;
-   unsigned int byte, crc, mask;
+   unsigned int crc, mask;
 
    i = 0;
    crc = 0xFFFFFFFF;
    while (message[i] != 0) {
-      byte = message[i];            // Get next byte.
+      unsigned int byte = message[i];            // Get next byte.
       crc = crc ^ byte;
       for (j = 7; j >= 0; j--) {    // Do eight times.
          mask = -(crc & 1);
@@ -258,7 +239,7 @@ static unsigned int crc32b(unsigned char *message) {
    return ~crc;
 }
 
-static hash_t hash(std::string s) {
+static hash_t hash(const std::string& s) {
     std::stringstream ss;
     ss << "0x"; // hacky but required for hex->int
 
@@ -326,35 +307,8 @@ static std::string b58encode_s(const std::string& data) {
     return result;
 }
 
-// decode base58 into string. used for signatures
-static std::string b58decode_s(const std::string& data) {
-    std::vector<u8> result((data.size() * 138 / 100) + 1);
-    
-    size_t resultlen = 1;
-    for(size_t i = 0; i < data.size(); i++) {
-        uint32_t carry = static_cast<uint32_t>(alphamap[data[i] & 0x7f]);
-    
-        for(size_t j = 0; j < resultlen; j++, carry >>= 8) {
-            carry += static_cast<uint32_t>(result[j] * 58);
-            result[j] = static_cast<uint8_t>(carry);
-        }
-    
-        for (; carry; carry >>= 8)
-            result[resultlen++] = static_cast<uint8_t>(carry);
-    }
-
-    result.resize(resultlen);
-    for(size_t i = 0; i < (data.size() - 1) && data[i] == b58map[0]; i++)
-        result.push_back(0);
-
-    std::reverse(result.begin(), result.end());
-
-    std::string res(result.begin(), result.end());
-    return res;
-}
-
 // encode hash into base58 (https://learnmeabitcoin.com/technical/base58)
-static std::string b58encode_h(hash_t h) {
+static std::string enc58(hash_t h) {
     std::deque<char> result;
     while(h > 0) {
         int remainder = (h % 58).convert_to<int>();
@@ -367,7 +321,7 @@ static std::string b58encode_h(hash_t h) {
 }
 
 // decode base58 into hash (https://learnmeabitcoin.com/technical/base58)
-static hash_t b58decode_h(std::string s) {
+static hash_t dec58(std::string s) {
     hash_t result = 0;
     
     for(std::size_t i = 0; i != s.size(); i++) {
@@ -381,20 +335,35 @@ static hash_t b58decode_h(std::string s) {
     return result;
 }
 
-static std::string htos(hash_t h) {
-    return b58encode_h(h);
+static std::string string_to_hex(const std::string& input) {
+    static const char hex_digits[] = "0123456789ABCDEF";
+
+    std::string output;
+    output.reserve(input.length() * 2);
+    
+    for (unsigned char c : input) {
+        output.push_back(hex_digits[c >> 4]);
+        output.push_back(hex_digits[c & 15]);
+    }
+
+    return output;
 }
 
+template <typename T>
+static T deserialize(const std::string& s) {
+    msgpack::object_handle oh;
+    msgpack::unpack(oh, s.data(), s.size());
+    msgpack::object obj = oh.get();
+    return obj.as<T>();
 }
 
-// aliases
-
-static hash_t enc(std::string s) {
-    return util::b58decode_h(s);
+template <typename T>
+static std::string serialize(T d) {
+    std::stringstream ss;
+    msgpack::pack(ss, d);
+    return ss.str();
 }
 
-static std::string dec(hash_t h) {
-    return util::b58encode_h(h);
 }
 
 }

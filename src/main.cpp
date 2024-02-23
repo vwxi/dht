@@ -16,7 +16,7 @@ int main(int argc, char** argv) {
     case 2: // join
         {
             node n(true, std::atoi(argv[2]));
-            n.run("pub2", "priv2");
+            n.run();
             n.join(net_addr("udp", argv[3], std::atoi(argv[4])), 
                 [&](net_contact peer) {
                     spdlog::info("join ok");
@@ -29,20 +29,31 @@ int main(int argc, char** argv) {
                 });
         }
         break;
-    case 3: // join & resolve own ip
+    case 3: // join & provide something
         {
             node n(true, std::atoi(argv[2]));
-            n.run("pub", "priv");
+            n.run();
             n.join(net_addr("udp", argv[3], std::atoi(argv[4])), 
                 [&](net_contact peer) {
-                    n.resolve(enc("3NYJ54uJys9xPA6DntLD3uaSQVKQW92gE8WNci7vLsKg"),
-                        [&](net_contact p) {
-                            spdlog::critical("resolved addresses...");
-                            for(auto a : p.addresses)
-                                spdlog::critical("\t{}", a.to_string());
-                        },
-                        [](net_contact) {
-                            spdlog::critical("couldn't resolve addresses");
+                    n.provide("lol", n.basic_nothing, n.basic_nothing);
+                }, 
+                [&](net_contact peer) {
+                    spdlog::info("join bad");
+                });
+        }
+        break;
+    case 4: // join & get providers
+        {
+            node n(true, std::atoi(argv[2]));
+            n.run();
+            n.join(net_addr("udp", argv[3], std::atoi(argv[4])), 
+                [&](net_contact peer) {
+                    n.get_providers("lol", 
+                        [&](std::vector<net_contact> providers) {
+                            spdlog::info("okay finally, sz: {}", providers.size());
+                            
+                            for(auto p : providers)
+                                spdlog::info("found provider {}", util::enc58(p.id));
                         });
                 }, 
                 [&](net_contact peer) {

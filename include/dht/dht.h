@@ -19,9 +19,9 @@ struct kv {
     u64 timestamp;
     std::string signature;
 
-    kv() : origin(empty_net_peer) { }
+    kv() : origin(empty_net_peer), timestamp(0), type(0) { }
 
-    kv(hash_t k, int ty, std::string v, net_peer o, u64 ts, std::string s) : 
+    kv(hash_t k, int ty, const std::string& v, const net_peer& o, u64 ts, const std::string& s) : 
         key(k), type(ty), value(v), origin(o), timestamp(ts), signature(s) { } 
 
     kv(hash_t k, const proto::stored_data& s) : 
@@ -29,16 +29,14 @@ struct kv {
 
     std::string sig_blob() const {
         proto::sig_blob sb;
-        sb.k = dec(key); // k: key
+        sb.k = util::enc58(key); // k: key
         sb.d = type; // d: store type
         sb.v = value; // v: value
-        sb.i = dec(origin.id); // i: origin ID
+        sb.i = util::enc58(origin.id); // i: origin ID
         sb.t = timestamp; // t: timestamp
 
-        std::stringstream ss;
-        msgpack::pack(ss, sb);
-
-        return ss.str();
+        std::string s = util::serialize(sb);
+        return s;
     }
 };
 
@@ -60,12 +58,12 @@ public:
     void generate_keypair();
     void export_keypair(std::string, std::string);
 
-    void put(std::string, std::string);
+    void put(std::string, std::string, basic_callback, basic_callback);
     void get(std::string, value_callback);
-    void provide(std::string, net_peer);
+    void provide(std::string, basic_callback, basic_callback);
     void get_providers(std::string, contacts_callback);
     void join(net_addr, basic_callback, basic_callback);
-    void resolve(hash_t, basic_callback, basic_callback);
+    void resolve(bool, hash_t, basic_callback, basic_callback);
     
 private:
     using fv_value = boost::variant<boost::blank, kv, std::list<net_contact>>;
@@ -93,7 +91,7 @@ private:
         int i = 0;
 
         auto task = [this, target_id] (
-            std::deque<net_contact> shortlist, std::shared_ptr<djc> claimed, int Q) -> fv_value {
+            const std::deque<net_contact>& shortlist, std::shared_ptr<djc> claimed, int Q) -> fv_value {
                 return lookup_value(shortlist, claimed, target_id, Q);
             };
 
@@ -108,32 +106,38 @@ private:
             std::deque<net_contact> shortlist;
 
             while(n++ < num_to_slice) {
-                shortlist.push_back(initial.front());
+                shortlist.push_back(net_contact(initial.front()));
                 initial.pop_front();
             }
 
             tasks.push_back(std::async(std::launch::async, task, shortlist, claimed, Q));
         }
 
-        for(auto&& t : tasks)
+        for(auto&& t : tasks) {
             paths.push_back(t.get());
-
+        }
+        
         return paths;
     }
 
     void refresh(tree*);
     void republish(kv);
 
+    // internal functions
     std::future<net_peer> _verify_node(net_peer);
     std::future<fut_t> _lookup(bool, net_contact, hash_t);
     net_contact resolve_peer_in_table(net_peer);
+    struct proto::provider_record parse_provider_record(std::string);
+    bool validate_provider_record(const struct proto::provider_record&);
+    void verify_provider_record(struct proto::provider_record, basic_callback, basic_callback);
     std::list<net_contact> lookup_nodes(std::deque<net_contact>, hash_t);
     fv_value lookup_value(std::deque<net_contact>, boost::optional<std::shared_ptr<djc>>, hash_t, int);
 
     // async interfaces
     void ping(net_contact, basic_callback, basic_callback);
-    void iter_store(int, std::string, std::string);
+    void iter_store(int, std::string, std::string, basic_callback, basic_callback);
     std::list<net_contact> iter_find_node(hash_t);
+    void iter_find_node_async(hash_t, contacts_callback);
     void identify(net_contact, identify_callback, basic_callback);
     void get_addresses(net_contact, hash_t, addresses_callback, basic_callback);
     void store(bool, net_contact, kv, basic_callback, basic_callback);
@@ -171,6 +175,7 @@ private:
 
 public:
     pki::crypto crypto;
+    boost::asio::thread_pool pool;
 };
 
 }
