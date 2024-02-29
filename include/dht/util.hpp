@@ -53,6 +53,7 @@
 #define R_LOCK(m) boost::shared_lock<boost::shared_mutex> read_lock(m);
 #define W_LOCK(m) boost::upgrade_lock<boost::shared_mutex> write_lock(m);
 #define TIME_NOW() duration_cast<seconds>(system_clock::now().time_since_epoch()).count()
+#define EINST(b, ...) template class b<__VA_ARGS__>;
 
 namespace lotus {
 
@@ -74,7 +75,7 @@ namespace proto {
 
 const int magic_length = 4; // magic length in bytes
 const int bucket_size = 20; // number of entries in k-buckets (k=20)
-const int bit_hash_width = 256; // hash width in bits
+const int bit_hash_width = 32; // hash width in bits
 const int missed_pings_allowed = 3; // number of missed pings allowed
 const int missed_messages_allowed = 3; // number of missed messages allowed
 const int net_timeout = 10; // number of seconds until timeout
@@ -90,7 +91,8 @@ const int key_size = 2048; // size of public/private keys in bytes
 const int quorum = 3; // quorum for alternative lookup procedure (lp_lookup)
 const int token_length = 32; // length of secret tokens
 const int table_entry_addr_limit = 10; // max number of addrs allowed for one table entry
-
+const std::string message_protocol = "udp";
+const std::string transport_protocol = "tcp";
 }
 
 namespace constants {
@@ -120,17 +122,17 @@ struct net_addr {
     typedef boost::variant<tcp::endpoint, udp::endpoint> endp;
 
     enum {
-        t_udp,
-        t_tcp
+        t_msg,
+        t_txp
     } transport_type;
 
     std::string addr;
     u16 port;
 
-    net_addr() : transport_type(t_udp), addr(), port(0) {  }
+    net_addr() : transport_type(t_msg), addr(), port(0) {  }
     net_addr(const std::string& t, const std::string& a, u16 p) : addr(a), port(p) {
-        if(t == "udp") transport_type = t_udp;
-        else if(t == "tcp") transport_type = t_tcp;
+        if(t == proto::message_protocol) transport_type = t_msg;
+        else if(t == proto::transport_protocol) transport_type = t_txp;
     }
 
     udp::endpoint udp_endpoint() const {
@@ -147,8 +149,8 @@ struct net_addr {
 
     std::string transport() const {
         switch(transport_type) {
-        case t_udp: return "udp";
-        case t_tcp: return "tcp";
+        case t_msg: return proto::message_protocol;
+        case t_txp: return proto::transport_protocol;
         default: return "unknown";
         }
     }
@@ -165,6 +167,7 @@ struct routing_table_entry {
     hash_t id;
     std::vector<mi_addr> addresses;
 
+    routing_table_entry() : id(0), addresses{} { }
     routing_table_entry(hash_t i, const net_addr& a) :
         id(i), addresses{ { a, 0 } } { }
 };

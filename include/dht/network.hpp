@@ -2,9 +2,9 @@
 #define _NETWORK_H
 
 #include "util.hpp"
-#include "routing.h"
-#include "proto.h"
-#include "upnp.h"
+#include "routing.hpp"
+#include "proto.hpp"
+#include "upnp.hpp"
 
 namespace lotus {
 namespace dht {
@@ -28,7 +28,7 @@ private:
         int action;
         std::promise<std::string> promise;
         bool satisfied;
-        item(net_peer r, u64 m, int a, bool s) : req(r), msg_id(m), action(a), satisfied(s) { }
+        item(const net_peer& r, u64 m, int a, bool s) : req(r), msg_id(m), action(a), satisfied(s) { }
     };
 
     void wait(std::list<item>::iterator, q_callback, f_callback);
@@ -37,9 +37,11 @@ private:
     std::list<item> items;
 };
 
+template <typename Network, typename Bucket>
 class node;
 
 /// @brief interface for networking
+template <typename Fwd>
 class network {
 public:
     using h_callback = std::function<void(net_peer, proto::message)>;
@@ -52,7 +54,7 @@ public:
 
     // send to individual address
     template <typename T>
-    void send(bool f, net_addr addr, int m, int a, hash_t i, u64 q, T d, msg_queue::q_callback ok, msg_queue::f_callback bad) {
+    void send(bool f, const net_addr& addr, int m, int a, hash_t i, u64 q, T d, msg_queue::q_callback ok, msg_queue::f_callback bad) {
         std::string s = prepare_message(m, a, i, q, d);
 
         if(f) {
@@ -106,11 +108,11 @@ public:
     
     std::string get_ip_address() {
         return local ? 
-            upnp_.get_local_ip_address() : 
-            upnp_.get_external_ip_address();
+            fwd_.get_local_ip_address() : 
+            fwd_.get_external_ip_address();
     }
 
-private:
+protected:
     template <typename T>
     std::string prepare_message(int m, int a, hash_t i, u64 q, T d) {
         msgpack::zone z;
@@ -136,8 +138,56 @@ private:
     udp::socket socket;
     udp::endpoint endpoint;
 
-    upnp upnp_;
+    Fwd fwd_;
 };
+
+///// FOR TESTS
+
+namespace test {
+
+class mock_network : public network<mock_forwarder> {
+public:
+    mock_network(bool, u16, h_callback);
+    ~mock_network();
+};
+
+// network that always responds (for routing table tests)
+class mock_rt_net_resp : public mock_network {
+public:
+    using mock_network::mock_network;
+
+    template <typename T>
+    void send(bool, const net_addr&, int, int, hash_t, u64, T, msg_queue::q_callback, msg_queue::f_callback);
+
+    template <typename T>
+    void send(bool, std::vector<net_addr>, int, int, hash_t, u64, T, msg_queue::q_callback, msg_queue::f_callback);
+};
+
+// network that never responds (for routing table tests)
+class mock_rt_net_unresp : public mock_network {
+public:
+    using mock_network::mock_network;
+
+    template <typename T>
+    void send(bool, const net_addr&, int, int, hash_t, u64, T, msg_queue::q_callback, msg_queue::f_callback);
+
+    template <typename T>
+    void send(bool, std::vector<net_addr>, int, int, hash_t, u64, T, msg_queue::q_callback, msg_queue::f_callback);
+};
+
+// network that sometimes responds (for routing table tests)
+class mock_rt_net_maybe : public mock_network {
+public:
+    using mock_network::mock_network;
+
+    template <typename T>
+    void send(bool, const net_addr&, int, int, hash_t, u64, T, msg_queue::q_callback, msg_queue::f_callback);
+
+    template <typename T>
+    void send(bool, std::vector<net_addr>, int, int, hash_t, u64, T, msg_queue::q_callback, msg_queue::f_callback);
+};
+
+}
 
 }
 }

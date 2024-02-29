@@ -1,7 +1,7 @@
-#include "network.h"
-#include "bucket.h"
-#include "proto.h"
-#include "routing.h"
+#include "network.hpp"
+#include "bucket.hpp"
+#include "proto.hpp"
+#include "routing.hpp"
 #include "util.hpp"
 
 namespace lotus {
@@ -34,7 +34,7 @@ void msg_queue::wait(std::list<item>::iterator it, q_callback ok, f_callback bad
         {
             LOCK(mutex);
             req = it->req;
-            it = items.erase(it);
+            items.erase(it);
         }
 
         switch(fs) {
@@ -94,22 +94,26 @@ bool msg_queue::pending(net_peer p, int action, u64 msg_id) {
 
 /// networking
 
-network::network(bool local_, u16 p, h_callback handler) :
+template <typename Fwd>
+network<Fwd>::network(bool local_, u16 p, h_callback handler) :
     local(local_),
     port(p),
     socket(ioc, udp::endpoint(udp::v4(), p)),
-    upnp_(false), // TODO: consider ipv6 addition?
-    message_handler(handler) { }
+    message_handler(handler) {
+    fwd_.initialize(false); /// @todo consider ipv6?
+}
 
-network::~network() {
+template <typename Fwd>
+network<Fwd>::~network() {
     if(release_thread.joinable()) release_thread.join();
     if(ioc_thread.joinable()) ioc_thread.join();
 }
 
-void network::run() {
+template <typename Fwd>
+void network<Fwd>::run() {
     release_thread = std::thread([&, this]() {
         while(!local) {
-            if(!upnp_.forward_port("dht", u_UDP, port)) {
+            if(!fwd_.forward_port("dht", u_UDP, port)) {
                 spdlog::error("upnp: failed to re-lease port mapping");
             }
 
@@ -121,7 +125,8 @@ void network::run() {
     ioc_thread = std::thread([&, this]() { ioc.run(); });
 }
 
-void network::recv() {
+template <typename Fwd>
+void network<Fwd>::recv() {
     socket.async_wait(udp::socket::wait_read,
         [this](boost::system::error_code ec) {
             if(ec) goto bad;
@@ -152,7 +157,8 @@ void network::recv() {
         });
 }
 
-void network::handle(std::string buf, udp::endpoint ep) {
+template <typename Fwd>
+void network<Fwd>::handle(std::string buf, udp::endpoint ep) {
     try {
         proto::message msg = util::deserialize<proto::message>(buf);
 
@@ -171,6 +177,65 @@ void network::handle(std::string buf, udp::endpoint ep) {
     } catch (std::exception& e) { spdlog::debug("exception caught: {}", e.what()); }
 }
 
+// for real case
+EINST(network, upnp);
+
+///// FOR TESTS
+
+// for test case
+EINST(network, test::mock_forwarder);
+
+namespace test {
+
+// mock_network
+
+mock_network::mock_network(bool, u16, h_callback) : network(true, 0, [](net_peer, proto::message){}) { }
+
+mock_network::~mock_network() { }
+
+// mock_rt_net_resp
+
+template <>
+void mock_rt_net_resp::send(bool, const net_addr& addr, int, int, hash_t, u64, msgpack::type::nil_t, msg_queue::q_callback ok, msg_queue::f_callback) {
+    ok(net_peer(0, addr), "");
+}
+
+template <>
+void mock_rt_net_resp::send(bool, std::vector<net_addr> addrs, int, int, hash_t, u64, msgpack::type::nil_t, msg_queue::q_callback ok, msg_queue::f_callback) {
+    ok(net_peer(0, addrs.front()), "");
+}
+
+// mock_rt_net_unresp
+
+template <>
+void mock_rt_net_unresp::send(bool, const net_addr& addr, int, int, hash_t, u64, msgpack::type::nil_t, msg_queue::q_callback, msg_queue::f_callback bad) {
+    bad(net_peer(0, addr));
+}
+
+template <>
+void mock_rt_net_unresp::send(bool, std::vector<net_addr> addrs, int, int, hash_t, u64, msgpack::type::nil_t, msg_queue::q_callback, msg_queue::f_callback bad) {
+    bad(net_peer(0, addrs.front()));
+}
+
+// mock_rt_net_maybe
+
+template <>
+void mock_rt_net_maybe::send(bool, const net_addr& addr, int, int, hash_t, u64, msgpack::type::nil_t, msg_queue::q_callback ok, msg_queue::f_callback bad) {
+    if(std::rand() & 1)
+        ok(net_peer(0, addr), "");
+    else
+        bad(net_peer(0, addr));
+}
+
+template <>
+void mock_rt_net_maybe::send(bool, std::vector<net_addr> addrs, int, int, hash_t, u64, msgpack::type::nil_t, msg_queue::q_callback ok, msg_queue::f_callback bad) {
+    if(std::rand() & 1)
+        ok(net_peer(0, addrs.front()), "");
+    else
+        bad(net_peer(0, addrs.front()));
+}
+
+}
 
 }
 }

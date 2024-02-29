@@ -41,8 +41,8 @@ struct peer_object {
     std::string i;
     MSGPACK_DEFINE_MAP(t, a, p, i);
     peer_object() { }
-    peer_object(std::string t_, std::string a_, int p_, std::string i_) : t(t_), a(a_), p(p_), i(i_) { }
-    peer_object(net_peer p_) : t(p_.addr.transport()), a(p_.addr.addr), p(p_.addr.port), i(util::enc58(p_.id)) { }
+    peer_object(const std::string& t_, const std::string& a_, int p_, const std::string& i_) : t(t_), a(a_), p(p_), i(i_) { }
+    explicit peer_object(const net_peer& p_) : t(p_.addr.transport()), a(p_.addr.addr), p(p_.addr.port), i(util::enc58(p_.id)) { }
     net_peer to_peer() const { return net_peer{ util::dec58(i), net_addr(t, a, p) }; }
 };
 
@@ -121,7 +121,7 @@ struct address_object {
     std::string a;
     std::string p;
     address_object() {  }
-    address_object(net_addr ad) : t(ad.transport()), a(ad.addr), p(std::to_string(ad.port)) { } 
+    explicit address_object(const net_addr& ad) : t(ad.transport()), a(ad.addr), p(std::to_string(ad.port)) { } 
     MSGPACK_DEFINE_MAP(t, a, p);
 };
 

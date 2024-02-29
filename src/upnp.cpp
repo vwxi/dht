@@ -1,10 +1,10 @@
-#include "upnp.h"
+#include "upnp.hpp"
 
 namespace lotus {
 namespace dht {
 
 // looking at miniupnpc/src/upnpc.c
-upnp::upnp(bool ipv6) {
+void upnp::initialize(bool ipv6) {
     int error = 0;
     char lan_addr[64] = "unset";
 
@@ -19,6 +19,7 @@ upnp::upnp(bool ipv6) {
     }
 
     local_ip = std::string(lan_addr);
+    initialized = true;
 }
 
 std::string upnp::get_external_ip_address() {
@@ -38,6 +39,8 @@ std::string upnp::get_local_ip_address() {
 }
 
 upnp::~upnp() {
+    if(!initialized) return;
+    
     for(port_mapping m : mappings) {
         std::string p(std::to_string(m.port));
         int r = UPNP_DeletePortMapping(

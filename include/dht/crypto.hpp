@@ -31,22 +31,22 @@ public:
 
     // import
     void import_keypair(keypair);
-    void import_file(std::string, std::string);
+    void import_file(const std::string&, const std::string&);
 
     // export
     void export_keypair(keypair&);
-    void export_file(std::string, std::string);
+    void export_file(const std::string&, const std::string&);
 
     // sign
-    std::string sign(std::string);
+    std::string sign(const std::string&);
 
     // verify
-    bool verify(RSA::PublicKey, std::string, std::string);
-    bool verify(std::string, std::string);
-    bool verify(dht::hash_t, std::string, std::string);
+    bool verify(RSA::PublicKey, const std::string&, const std::string&);
+    bool verify(const std::string&, const std::string&);
+    bool verify(dht::hash_t, const std::string&, const std::string&);
 
     // keystore
-    void ks_put(dht::hash_t, std::string);
+    void ks_put(dht::hash_t, const std::string&);
     boost::optional<RSA::PublicKey> ks_get(dht::hash_t);
     void ks_del(dht::hash_t);
     bool ks_has(dht::hash_t);

@@ -1,5 +1,5 @@
-#include "crypto.h"
-#include "dht.h"
+#include "crypto.hpp"
+#include "dht.hpp"
 
 namespace lotus {
 namespace pki {
@@ -35,7 +35,7 @@ void crypto::import_keypair(keypair kp) {
     key_pair.pub_key = kp.pub_key;
 }
 
-void crypto::import_file(std::string pub_filename, std::string priv_filename) {
+void crypto::import_file(const std::string& pub_filename, const std::string& priv_filename) {
     key_pair.pub_key.BERDecode(FileSource(pub_filename.c_str(), true).Ref());
     key_pair.priv_key.BERDecode(FileSource(priv_filename.c_str(), true).Ref());
 }
@@ -45,12 +45,12 @@ void crypto::export_keypair(keypair& kp) {
     kp.pub_key = key_pair.pub_key;
 }
 
-void crypto::export_file(std::string pub_filename, std::string priv_filename) {
+void crypto::export_file(const std::string& pub_filename, const std::string& priv_filename) {
     key_pair.pub_key.BEREncode(FileSink(pub_filename.c_str(), true).Ref());
     key_pair.priv_key.DEREncode(FileSink(priv_filename.c_str(), true).Ref());
 }
 
-std::string crypto::sign(std::string message) {
+std::string crypto::sign(const std::string& message) {
     std::string signature;
     RSASS<PSSR, SHA256>::Signer signer(key_pair.priv_key);
 
@@ -59,7 +59,7 @@ std::string crypto::sign(std::string message) {
     return signature;
 }
 
-bool crypto::verify(RSA::PublicKey pk, std::string message, std::string signature) {
+bool crypto::verify(RSA::PublicKey pk, const std::string& message, const std::string& signature) {
     try {
         RSASS<PSSR, SHA256>::Verifier verifier(pk);
 
@@ -70,16 +70,16 @@ bool crypto::verify(RSA::PublicKey pk, std::string message, std::string signatur
         );
 
         return true;
-    } catch (std::exception& e) {
+    } catch (std::exception&) {
         return false;
     }
 }
 
-bool crypto::verify(std::string message, std::string signature) {
+bool crypto::verify(const std::string& message, const std::string& signature) {
     return verify(key_pair.pub_key, message, signature);
 }
 
-bool crypto::verify(dht::hash_t id, std::string message, std::string signature) {
+bool crypto::verify(dht::hash_t id, const std::string& message, const std::string& signature) {
     auto k = ks_get(id);
 
     if(!k.has_value()) {
@@ -106,7 +106,7 @@ void crypto::ks_del(dht::hash_t h) {
     ks.erase(h);
 }
 
-void crypto::ks_put(dht::hash_t h, std::string s) {
+void crypto::ks_put(dht::hash_t h, const std::string& s) {
     if(s.empty() || ks_get(h).has_value())
         return;
 
@@ -116,7 +116,7 @@ void crypto::ks_put(dht::hash_t h, std::string s) {
     try {
         pk.Load(StringSource(s, true).Ref());
         ks[h] = std::move(pk);
-    } catch (std::exception& e) { }
+    } catch (std::exception&) { }
 }
 
 bool crypto::ks_has(dht::hash_t h) {

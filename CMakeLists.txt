@@ -9,6 +9,9 @@ set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g")
 set(CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_LINKER_FLAGS_DEBUG} -g")
 
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC")
+set(CMAKE_LINKER_FLAGS "${CMAKE_LINKER_FLAGS} -fPIC")
+
 set(Boost_USE_STATIC_LIBS OFF)
 set(Boost_USE_MULTITHREADED ON)
 set(Boost_USE_STATIC_RUNTIME OFF)
@@ -52,9 +55,7 @@ add_subdirectory(extern/msgpack-c)
 add_subdirectory(extern/cryptopp-cmake)
 add_subdirectory(extern/miniupnp/miniupnpc)
 
-add_executable(
-	dht
-	src/main.cpp
+list(APPEND source_files
 	src/network.cpp
 	src/bucket.cpp
 	src/routing.cpp
@@ -63,11 +64,42 @@ add_executable(
 	src/upnp.cpp
 )
 
-target_include_directories(
-	${PROJECT_NAME} PUBLIC
+list(APPEND include_folders
 	"${PROJECT_BINARY_DIR}"
 	"${PROJECT_SOURCE_DIR}/include/dht"
 	"${PROJECT_SOURCE_DIR}/extern"
 )
 
-target_link_libraries(dht PUBLIC Boost::system Boost::thread spdlog::spdlog pthread msgpack-cxx cryptopp miniupnpc)
+list(APPEND link_libraries
+	Boost::system 
+	Boost::thread 
+	spdlog::spdlog 
+	pthread 
+	msgpack-cxx 
+	cryptopp::cryptopp
+	miniupnpc
+)
+
+add_library(dht SHARED ${source_files})
+target_include_directories(dht PUBLIC ${include_folders})
+target_link_libraries(dht PUBLIC ${link_libraries})
+
+# testing
+
+find_package(Catch2 CONFIG REQUIRED)
+
+include(CTest)
+include(Catch)
+
+list(
+	APPEND test_files
+	tests/routing_table_test.cpp
+)
+
+add_executable(dhttest tests/main.cpp ${test_files})
+target_include_directories(dhttest PRIVATE ${include_folders})
+target_link_libraries(dhttest PRIVATE dht Catch2::Catch2WithMain ${link_libraries})
+
+enable_testing()
+
+add_test(dht_test dhttest)

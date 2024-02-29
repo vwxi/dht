@@ -1,35 +1,39 @@
-#include "dht.h"
-#include "proto.h"
+#include "dht.hpp"
+#include "proto.hpp"
 #include "util.hpp"
 
 namespace lotus {
 namespace dht {
 
-node::node(bool local, u16 port) :
-    net(local, port, std::bind(&node::handler, this, _1, _2)),
+template <typename Network, typename Bucket>
+node<Network, Bucket>::node(bool local, u16 port) :
+    net(local, port, std::bind(&node<Network, Bucket>::handler, this, _1, _2)),
     reng(rd()),
     treng(rd()),
     running(false) {
     std::srand(util::time_now());
 }
 
-node::~node() {
+template <typename Network, typename Bucket>
+node<Network, Bucket>::~node() {
     if(running) {
         if(refresh_thread.joinable()) refresh_thread.join();
         if(republish_thread.joinable()) republish_thread.join();
     }
 }
 
-hash_t node::get_id() const {
+template <typename Network, typename Bucket>
+hash_t node<Network, Bucket>::get_id() const {
     return id;
 } 
 
 /// runners
 
-void node::_run() {
+template <typename Network, typename Bucket>
+void node<Network, Bucket>::_run() {
     id = util::hash(crypto.pub_key());
 
-    table = std::make_shared<routing_table>(id, net);
+    table = std::make_shared<routing_table<Network, Bucket>>(id, net);
     table_ref = table;
     table->init();
 
@@ -44,7 +48,7 @@ void node::_run() {
     refresh_thread = std::thread([&, this]() {
         while(true) {
             std::this_thread::sleep_for(seconds(proto::refresh_interval));
-            table->dfs([&, this](tree* ptr) {
+            table->dfs([&, this](tree<Network, Bucket>* ptr) {
                 auto time_since = util::time_now() - ptr->data.last_seen;
                 if(time_since > proto::refresh_time)
                     refresh(ptr);
@@ -87,30 +91,35 @@ void node::_run() {
 }
 
 /// @brief generate keypair, start node
-void node::run() {
+template <typename Network, typename Bucket>
+void node<Network, Bucket>::run() {
     crypto.generate_keypair();
     _run();
 }
 
 /// @brief import keypair from files, start node
-void node::run(std::string pub_filename, std::string priv_filename) {
+template <typename Network, typename Bucket>
+void node<Network, Bucket>::run(const std::string& pub_filename, const std::string& priv_filename) {
     crypto.import_file(pub_filename, priv_filename);
     _run();
 }
 
 /// keypair stuff
 
-void node::generate_keypair() {
+template <typename Network, typename Bucket>
+void node<Network, Bucket>::generate_keypair() {
     crypto.generate_keypair();
 }
 
-void node::export_keypair(std::string pub_filename, std::string priv_filename) {
+template <typename Network, typename Bucket>
+void node<Network, Bucket>::export_keypair(const std::string& pub_filename, const std::string& priv_filename) {
     crypto.export_file(pub_filename, priv_filename);
 }
 
 /// handlers
 
-void node::_handler(net_peer peer, proto::message msg) {
+template <typename Network, typename Bucket>
+void node<Network, Bucket>::_handler(net_peer peer, proto::message msg) {
     switch(msg.a) {
     case proto::actions::ping: 
         handle_ping(std::move(peer), std::move(msg)); 
@@ -133,7 +142,8 @@ void node::_handler(net_peer peer, proto::message msg) {
     }
 }
 
-void node::handler(net_peer peer, proto::message msg) {
+template <typename Network, typename Bucket>
+void node<Network, Bucket>::handler(net_peer peer, proto::message msg) {
     // identify before any query
     if(!crypto.ks_has(peer.id) && 
         msg.a != proto::actions::identify &&
@@ -152,7 +162,8 @@ void node::handler(net_peer peer, proto::message msg) {
     }
 }
 
-void node::handle_ping(net_peer peer, proto::message msg) {
+template <typename Network, typename Bucket>
+void node<Network, Bucket>::handle_ping(net_peer peer, proto::message msg) {
     if(msg.m == proto::type::query) {
         net.send(false,
             peer.addr, proto::type::response, proto::actions::ping, 
@@ -163,7 +174,8 @@ void node::handle_ping(net_peer peer, proto::message msg) {
     }
 }
 
-void node::handle_store(net_peer peer, proto::message msg) {
+template <typename Network, typename Bucket>
+void node<Network, Bucket>::handle_store(net_peer peer, proto::message msg) {
     if(msg.m == proto::type::query) {
         proto::store_query_data d;
         msg.d.convert(d);
@@ -243,13 +255,14 @@ void node::handle_store(net_peer peer, proto::message msg) {
     }
 }
 
-void node::handle_find_node(net_peer peer, proto::message msg) {
+template <typename Network, typename Bucket>
+void node<Network, Bucket>::handle_find_node(net_peer peer, proto::message msg) {
     if(msg.m == proto::type::query) {
         proto::find_query_data d;
         msg.d.convert(d);
 
         hash_t target_id(util::dec58(d.t));
-        const bucket& bkt = table->find_bucket(target_id);
+        const bucket<Network>& bkt = table->find_bucket(target_id);
 
         std::vector<proto::peer_object> b;
 
@@ -280,7 +293,8 @@ void node::handle_find_node(net_peer peer, proto::message msg) {
     }
 }
 
-void node::handle_find_value(net_peer peer, proto::message msg) {
+template <typename Network, typename Bucket>
+void node<Network, Bucket>::handle_find_value(net_peer peer, proto::message msg) {
     if(msg.m == proto::type::query) {
         proto::find_query_data d;
         msg.d.convert(d);
@@ -289,7 +303,7 @@ void node::handle_find_value(net_peer peer, proto::message msg) {
 
         {
             LOCK(ht_mutex);
-            decltype(ht)::iterator it;
+            typename decltype(ht)::iterator it;
             if((it = ht.find(target_id)) != ht.end()) {
                 // key exists in hash table
                 net.send(false,
@@ -304,7 +318,7 @@ void node::handle_find_value(net_peer peer, proto::message msg) {
                     net.queue.q_nothing, net.queue.f_nothing);
             } else {
                 // key does not exist in hash table
-                const bucket& bkt = table->find_bucket(target_id);
+                const bucket<Network>& bkt = table->find_bucket(target_id);
 
                 std::vector<proto::peer_object> b;
 
@@ -340,7 +354,8 @@ void node::handle_find_value(net_peer peer, proto::message msg) {
     }
 }
 
-void node::handle_identify(net_peer peer, proto::message msg) {
+template <typename Network, typename Bucket>
+void node<Network, Bucket>::handle_identify(net_peer peer, proto::message msg) {
     if(msg.m == proto::type::query) {
         proto::identify_query_data d;
         msg.d.convert(d);
@@ -362,7 +377,8 @@ void node::handle_identify(net_peer peer, proto::message msg) {
     }
 }
 
-void node::handle_get_addresses(net_peer peer, proto::message msg) {
+template <typename Network, typename Bucket>
+void node<Network, Bucket>::handle_get_addresses(net_peer peer, proto::message msg) {
     if(msg.m == proto::type::query) {
         proto::get_addresses_query_data d;
         msg.d.convert(d);
@@ -398,17 +414,19 @@ void node::handle_get_addresses(net_peer peer, proto::message msg) {
 
 /// public interfaces 
 
-void node::put(std::string key, std::string value, basic_callback ok, basic_callback bad) {
+template <typename Network, typename Bucket>
+void node<Network, Bucket>::put(const std::string& key, const std::string& value, basic_callback ok, basic_callback bad) {
     iter_store(proto::store_type::data, key, value, ok, bad);
 }
 
-void node::get(std::string key, value_callback cb) {
+template <typename Network, typename Bucket>
+void node<Network, Bucket>::get(const std::string& key, value_callback cb) {
     std::list<fv_value> l = disjoint_lookup_value(util::hash(key), proto::quorum);
     std::vector<kv> values;
 
     for(auto i : l) {
         if(i.type() == typeid(boost::blank) ||
-            i.type() == typeid(bucket)) {
+            i.type() == typeid(bucket<Network>)) {
             continue;
         } else if(i.type() == typeid(kv)) {
             kv v = boost::get<kv>(i);
@@ -424,7 +442,8 @@ void node::get(std::string key, value_callback cb) {
 }
 
 // always wrap in try-catch block
-struct proto::provider_record node::parse_provider_record(std::string s) {
+template <typename Network, typename Bucket>
+struct proto::provider_record node<Network, Bucket>::parse_provider_record(const std::string& s) {
     struct proto::provider_record pr = util::deserialize<struct proto::provider_record>(s);
     return pr;
 }
@@ -432,7 +451,8 @@ struct proto::provider_record node::parse_provider_record(std::string s) {
 // check:
 // - expiry date
 // - signature
-bool node::validate_provider_record(const struct proto::provider_record& pr) {
+template <typename Network, typename Bucket>
+bool node<Network, Bucket>::validate_provider_record(const struct proto::provider_record& pr) {
     try {
         hash_t p_id = util::dec58(pr.i);
 
@@ -454,7 +474,8 @@ bool node::validate_provider_record(const struct proto::provider_record& pr) {
     }
 }
 
-void node::verify_provider_record(struct proto::provider_record pr, basic_callback ok, basic_callback bad) {
+template <typename Network, typename Bucket>
+void node<Network, Bucket>::verify_provider_record(struct proto::provider_record pr, basic_callback ok, basic_callback bad) {
     resolve(false, util::dec58(pr.i), [this, pr, ok, bad](net_contact c) {
         // we found addresses
         if(crypto.ks_has(c.id)) {
@@ -484,7 +505,8 @@ void node::verify_provider_record(struct proto::provider_record pr, basic_callba
     }, [this, bad](net_contact c) { bad(c); });
 }
 
-void node::provide(std::string key, basic_callback ok, basic_callback bad) {
+template <typename Network, typename Bucket>
+void node<Network, Bucket>::provide(const std::string& key, basic_callback ok, basic_callback bad) {
     struct proto::provider_record pr{
         util::enc58(id), 
         util::time_now() + proto::republish_time, 
@@ -495,7 +517,8 @@ void node::provide(std::string key, basic_callback ok, basic_callback bad) {
 } 
 
 /// @note there is a design quirk that only allows for one provider per ID due to the nature of a key-value map
-void node::get_providers(std::string key, contacts_callback cb) {
+template <typename Network, typename Bucket>
+void node<Network, Bucket>::get_providers(const std::string& key, contacts_callback cb) {
     get(key, [this, cb](std::vector<kv> values) {
         values.erase(std::remove_if(values.begin(), values.end(), [](const kv& p) { 
             return p.type != proto::store_type::provider_record;
@@ -517,7 +540,8 @@ void node::get_providers(std::string key, contacts_callback cb) {
 
 /// async actions
 
-void node::ping(net_contact contact, basic_callback ok, basic_callback bad) {
+template <typename Network, typename Bucket>
+void node<Network, Bucket>::ping(net_contact contact, basic_callback ok, basic_callback bad) {
     net.send(true,
         contact.addresses, proto::type::query, proto::actions::ping,
         id, util::msg_id(), msgpack::type::nil_t(),
@@ -531,7 +555,8 @@ void node::ping(net_contact contact, basic_callback ok, basic_callback bad) {
         });
 }
 
-void node::store(bool origin, net_contact p, kv val, basic_callback ok, basic_callback bad) {
+template <typename Network, typename Bucket>
+void node<Network, Bucket>::store(bool origin, net_contact p, kv val, basic_callback ok, basic_callback bad) {
     u32 chksum = util::crc32b(const_cast<u8*>(reinterpret_cast<const u8*>(val.value.data())));
     
     // hacky
@@ -577,7 +602,8 @@ void node::store(bool origin, net_contact p, kv val, basic_callback ok, basic_ca
         });
 }
 
-void node::find_node(net_contact p, hash_t target_id, bucket_callback ok, basic_callback bad) {
+template <typename Network, typename Bucket>
+void node<Network, Bucket>::find_node(net_contact p, hash_t target_id, bucket_callback ok, basic_callback bad) {
     net.send(true,
         p.addresses, proto::type::query, proto::actions::find_node,
         id, util::msg_id(), proto::find_query_data { .t = util::enc58(target_id) },
@@ -615,7 +641,8 @@ void node::find_node(net_contact p, hash_t target_id, bucket_callback ok, basic_
         });
 }
 
-void node::find_value(net_contact p, hash_t target_id, find_value_callback ok, basic_callback bad) {
+template <typename Network, typename Bucket>
+void node<Network, Bucket>::find_value(net_contact p, hash_t target_id, find_value_callback ok, basic_callback bad) {
     net.send(true,
         p.addresses, proto::type::query, proto::actions::find_value,
         id, util::msg_id(), proto::find_query_data { .t = util::enc58(target_id) },
@@ -684,7 +711,8 @@ void node::find_value(net_contact p, hash_t target_id, find_value_callback ok, b
         });
 }
 
-void node::identify(net_contact contact, identify_callback ok, basic_callback bad) {
+template <typename Network, typename Bucket>
+void node<Network, Bucket>::identify(net_contact contact, identify_callback ok, basic_callback bad) {
     std::string token = util::gen_token(treng);
 
     if(crypto.ks_has(contact.id)) {
@@ -729,7 +757,8 @@ void node::identify(net_contact contact, identify_callback ok, basic_callback ba
         });
 }
 
-std::future<net_peer> node::_verify_node(net_peer peer) {
+template <typename Network, typename Bucket>
+std::future<net_peer> node<Network, Bucket>::_verify_node(net_peer peer) {
     std::shared_ptr<std::promise<net_peer>> prom = std::make_shared<std::promise<net_peer>>();
     std::future<net_peer> fut = prom->get_future();
 
@@ -744,7 +773,8 @@ std::future<net_peer> node::_verify_node(net_peer peer) {
     return fut;
 }
 
-void node::get_addresses(net_contact contact, hash_t target_id, addresses_callback ok, basic_callback bad) {
+template <typename Network, typename Bucket>
+void node<Network, Bucket>::get_addresses(net_contact contact, hash_t target_id, addresses_callback ok, basic_callback bad) {
     net.send(true,
         contact.addresses, proto::type::query, proto::actions::get_addresses,
         id, util::msg_id(), proto::get_addresses_query_data{
@@ -785,7 +815,8 @@ void node::get_addresses(net_contact contact, hash_t target_id, addresses_callba
         });
 }
 
-std::future<node::fut_t> node::_lookup(bool fv, net_contact p, hash_t target_id) {
+template <typename Network, typename Bucket>
+std::future<typename node<Network, Bucket>::fut_t> node<Network, Bucket>::_lookup(bool fv, net_contact p, hash_t target_id) {
     std::shared_ptr<std::promise<fut_t>> prom = std::make_shared<std::promise<fut_t>>();
     std::future<fut_t> fut = prom->get_future();
     
@@ -804,13 +835,15 @@ std::future<node::fut_t> node::_lookup(bool fv, net_contact p, hash_t target_id)
 
 /// @brief lookup in routing table, if exists create an entry and return it filled w/ addresses
 /// @brief otherwise, just
-net_contact node::resolve_peer_in_table(net_peer peer) {
+template <typename Network, typename Bucket>
+net_contact node<Network, Bucket>::resolve_peer_in_table(net_peer peer) {
     boost::optional<routing_table_entry> res = table->find(peer.id);
     return res.has_value() ? net_contact(res.value()) : net_contact(peer);
 }
 
 /// @brief see xlattice/kademlia lookup
-std::list<net_contact> node::lookup_nodes(std::deque<net_contact> shortlist, hash_t target_id) {
+template <typename Network, typename Bucket>
+std::list<net_contact> node<Network, Bucket>::lookup_nodes(std::deque<net_contact> shortlist, hash_t target_id) {
     std::list<net_contact> res;
     std::deque<net_peer> visited;
 
@@ -907,7 +940,8 @@ std::list<net_contact> node::lookup_nodes(std::deque<net_contact> shortlist, has
 }
 
 // see libp2p kad value retrieval 
-node::fv_value node::lookup_value(
+template <typename Network, typename Bucket>
+typename node<Network, Bucket>::fv_value node<Network, Bucket>::lookup_value(
     std::deque<net_contact> starting_list,
     boost::optional<std::shared_ptr<djc>> claimed,
     hash_t key, 
@@ -1087,7 +1121,8 @@ node::fv_value node::lookup_value(
 }
 
 // this is for a new key-value pair
-void node::iter_store(int type, std::string key, std::string value, basic_callback ok, basic_callback bad) {
+template <typename Network, typename Bucket>
+void node<Network, Bucket>::iter_store(int type, const std::string& key, const std::string& value, basic_callback ok, basic_callback bad) {
     hash_t hash = util::hash(key);
     std::list<net_contact> b = iter_find_node(hash);
 
@@ -1106,14 +1141,16 @@ void node::iter_store(int type, std::string key, std::string value, basic_callba
 }
 
 // this is for republishing
-void node::republish(kv val) {
+template <typename Network, typename Bucket>
+void node<Network, Bucket>::republish(kv val) {
     std::list<net_contact> b = iter_find_node(val.key);
 
     for(auto i : b)
         store(false, i, val, basic_nothing, basic_nothing);
 }
 
-std::list<net_contact> node::iter_find_node(hash_t target_id) {
+template <typename Network, typename Bucket>
+std::list<net_contact> node<Network, Bucket>::iter_find_node(hash_t target_id) {
     std::deque<routing_table_entry> a = table->find_alpha(target_id);
     std::deque<net_contact> shortlist(a.size());
 
@@ -1127,7 +1164,8 @@ std::list<net_contact> node::iter_find_node(hash_t target_id) {
     return lookup_nodes(shortlist, target_id);
 }
 
-void node::iter_find_node_async(hash_t target_id, contacts_callback ok) {
+template <typename Network, typename Bucket>
+void node<Network, Bucket>::iter_find_node_async(hash_t target_id, contacts_callback ok) {
     boost::asio::post(pool, [this, target_id, ok]() {
         std::list<net_contact> nodes = iter_find_node(target_id);
         std::vector<net_contact> vec(nodes.begin(), nodes.end());
@@ -1136,7 +1174,8 @@ void node::iter_find_node_async(hash_t target_id, contacts_callback ok) {
 }
 
 // refreshing buckets will remove all alternate IP addresses from the table
-void node::refresh(tree* ptr) {
+template <typename Network, typename Bucket>
+void node<Network, Bucket>::refresh(tree<Network, Bucket>* ptr) {
     if(ptr == nullptr) return;
     if(!ptr->leaf) return;
     
@@ -1163,7 +1202,8 @@ void node::refresh(tree* ptr) {
     }
 }
 
-void node::join(net_addr a, basic_callback ok, basic_callback bad) {
+template <typename Network, typename Bucket>
+void node<Network, Bucket>::join(const net_addr& a, basic_callback ok, basic_callback bad) {
     // add peer to routing table
     ping(net_contact(a), [this, ok](net_contact c) {
         // lookup our own id
@@ -1177,7 +1217,7 @@ void node::join(net_addr a, basic_callback ok, basic_callback bad) {
 
         // it refreshes all buckets further away than its closest neighbor, 
         // which will be in the occupied bucket with the lowest index.
-        table->dfs([&, this](tree* ptr) {
+        table->dfs([&, this](tree<Network, Bucket>* ptr) {
             hash_t mask(~hash_t(0) << (proto::bit_hash_width - ptr->prefix.cutoff));
             if((c.id & mask) != ptr->prefix.prefix)
                 refresh(ptr);
@@ -1187,7 +1227,8 @@ void node::join(net_addr a, basic_callback ok, basic_callback bad) {
     }, bad);
 }
 
-void node::resolve(bool add, hash_t target_id, basic_callback ok, basic_callback bad) {
+template <typename Network, typename Bucket>
+void node<Network, Bucket>::resolve(bool add, hash_t target_id, basic_callback ok, basic_callback bad) {
     iter_find_node_async(target_id, [this, add, target_id, ok, bad](std::vector<net_contact> nodes) {
         std::size_t sz = nodes.size();
         std::shared_ptr<std::size_t> cnt = std::make_shared<std::size_t>(0);

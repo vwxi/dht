@@ -18,16 +18,19 @@ enum t_protocol {
 };
 
 /// @brief a wrapper for miniupnp. using upnp igd to forward ports
+
 class upnp {
 public:
-    upnp(bool);
     ~upnp();
-
+    
+    void initialize(bool);
     bool forward_port(std::string, t_protocol, u16);
     std::string get_external_ip_address();
     std::string get_local_ip_address();
 
-private:
+protected:
+    bool initialized = false;
+
     UPNPDev* devlist;
     UPNPUrls urls;
     IGDdatas data;
@@ -35,6 +38,20 @@ private:
 
     std::vector<port_mapping> mappings;
 };
+
+namespace test {
+
+// fake upnp resolver to always resolve to localhost
+class mock_forwarder : public upnp { 
+public:
+    ~mock_forwarder() { }
+
+    void initialize(bool) { local_ip = "127.0.0.1"; }
+    std::string get_external_ip_address() { return local_ip; }
+    bool forward_port(std::string, t_protocol, u16) { return true; }
+};
+
+}
 
 }
 }

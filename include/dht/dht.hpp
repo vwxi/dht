@@ -2,14 +2,18 @@
 #define _DHT_H
 
 #include "util.hpp"
-#include "proto.h"
-#include "bucket.h"
-#include "routing.h"
-#include "network.h"
-#include "crypto.h"
+#include "proto.hpp"
+#include "bucket.hpp"
+#include "routing.hpp"
+#include "network.hpp"
+#include "crypto.hpp"
 
 namespace lotus {
 namespace dht {
+
+typedef network<upnp> dht_network;
+typedef bucket<dht_network> dht_bucket;
+typedef node<dht_network, dht_bucket> dht_node;
 
 struct kv {
     hash_t key;
@@ -40,6 +44,7 @@ struct kv {
     }
 };
 
+template <typename Network, typename Bucket>
 class node {
 public:
     using basic_callback = std::function<void(net_contact)>;
@@ -54,22 +59,22 @@ public:
     hash_t get_id() const;
     
     void run();
-    void run(std::string, std::string);
+    void run(const std::string&, const std::string&);
     void generate_keypair();
-    void export_keypair(std::string, std::string);
+    void export_keypair(const std::string&, const std::string&);
 
-    void put(std::string, std::string, basic_callback, basic_callback);
-    void get(std::string, value_callback);
-    void provide(std::string, basic_callback, basic_callback);
-    void get_providers(std::string, contacts_callback);
-    void join(net_addr, basic_callback, basic_callback);
+    void put(const std::string&, const std::string&, basic_callback, basic_callback);
+    void get(const std::string&, value_callback);
+    void provide(const std::string&, basic_callback, basic_callback);
+    void get_providers(const std::string&, contacts_callback);
+    void join(const net_addr&, basic_callback, basic_callback);
     void resolve(bool, hash_t, basic_callback, basic_callback);
     
 private:
     using fv_value = boost::variant<boost::blank, kv, std::list<net_contact>>;
     using bucket_callback = std::function<void(net_contact, std::list<net_contact>)>;
     using find_value_callback = std::function<void(net_contact, fv_value)>;
-    using identify_callback = std::function<void(net_peer, std::string)>;
+    using identify_callback = std::function<void(net_peer, const std::string&)>;
     using addresses_callback = std::function<void(net_contact, std::list<net_peer>)>;
     using fut_t = std::tuple<net_contact, fv_value>;
 
@@ -113,21 +118,20 @@ private:
             tasks.push_back(std::async(std::launch::async, task, shortlist, claimed, Q));
         }
 
-        for(auto&& t : tasks) {
-            paths.push_back(t.get());
-        }
+        std::transform(tasks.begin(), tasks.end(), std::back_inserter(paths),
+            [&](auto&& t) { return t.get(); });
         
         return paths;
     }
 
-    void refresh(tree*);
+    void refresh(tree<Network, Bucket>*);
     void republish(kv);
 
     // internal functions
     std::future<net_peer> _verify_node(net_peer);
     std::future<fut_t> _lookup(bool, net_contact, hash_t);
     net_contact resolve_peer_in_table(net_peer);
-    struct proto::provider_record parse_provider_record(std::string);
+    struct proto::provider_record parse_provider_record(const std::string&);
     bool validate_provider_record(const struct proto::provider_record&);
     void verify_provider_record(struct proto::provider_record, basic_callback, basic_callback);
     std::list<net_contact> lookup_nodes(std::deque<net_contact>, hash_t);
@@ -135,7 +139,7 @@ private:
 
     // async interfaces
     void ping(net_contact, basic_callback, basic_callback);
-    void iter_store(int, std::string, std::string, basic_callback, basic_callback);
+    void iter_store(int, const std::string&, const std::string&, basic_callback, basic_callback);
     std::list<net_contact> iter_find_node(hash_t);
     void iter_find_node_async(hash_t, contacts_callback);
     void identify(net_contact, identify_callback, basic_callback);
@@ -158,10 +162,10 @@ private:
 
     std::atomic_bool running;
 
-    network net;
+    Network net;
     
-    std::shared_ptr<routing_table> table;
-    std::weak_ptr<routing_table> table_ref;
+    std::shared_ptr<routing_table<Network, Bucket>> table;
+    std::weak_ptr<routing_table<Network, Bucket>> table_ref;
 
     std::mutex ht_mutex;
     std::unordered_map<hash_t, kv> ht;
